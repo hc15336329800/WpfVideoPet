@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("WpfVideoPet")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+9430fe5dea169a90aef3685c0b78f6bdaf9291d8")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8d0709a8d6ea0c047c38c2ba699cc9ea5713cef5")]
 [assembly: System.Reflection.AssemblyProductAttribute("WpfVideoPet")]
 [assembly: System.Reflection.AssemblyTitleAttribute("WpfVideoPet")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

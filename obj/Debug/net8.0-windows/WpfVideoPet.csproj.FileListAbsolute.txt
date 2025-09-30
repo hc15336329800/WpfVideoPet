@@ -868,3 +868,5 @@ C:\Users\zhangguoren\Documents\WpfVideoPet\obj\Debug\net8.0-windows\refint\WpfVi
 C:\Users\zhangguoren\Documents\WpfVideoPet\obj\Debug\net8.0-windows\WpfVideoPet.pdb
 C:\Users\zhangguoren\Documents\WpfVideoPet\obj\Debug\net8.0-windows\WpfVideoPet.genruntimeconfig.cache
 C:\Users\zhangguoren\Documents\WpfVideoPet\obj\Debug\net8.0-windows\ref\WpfVideoPet.dll
+C:\Users\zhangguoren\Documents\WpfVideoPet\obj\Debug\net8.0-windows\OverlayWindow.baml
+C:\Users\zhangguoren\Documents\WpfVideoPet\obj\Debug\net8.0-windows\OverlayWindow.g.cs
