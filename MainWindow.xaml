@@ -4,12 +4,13 @@
         xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
         xmlns:h="clr-namespace:HelixToolkit.Wpf;assembly=HelixToolkit.Wpf"
         Title="VideoPet" WindowState="Maximized" WindowStyle="None" Background="Black" KeyDown="Window_KeyDown">
-    <Grid>
+    <Grid ClipToBounds="False">
+
         <!-- 1) 视频层 -->
         <vlc:VideoView x:Name="VideoView" Panel.ZIndex="0" Background="Transparent"/>
 
         <!-- 2) 左上角天气叠加 -->
-        <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16" Padding="10" CornerRadius="8" Background="#66000000" Panel.ZIndex="50" IsHitTestVisible="False">
+        <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16" Padding="10" CornerRadius="8" Background="#66000000" Panel.ZIndex="9999" IsHitTestVisible="False">
             <StackPanel>
                 <TextBlock x:Name="TxtCity" Text="城市: -" Foreground="White" FontSize="16" FontWeight="Bold"/>
                 <TextBlock x:Name="TxtWeather" Text="天气: -" Foreground="White" FontSize="14"/>
@@ -19,7 +20,7 @@
         </Border>
 
         <!-- 3) 右下角 3D 宠物（悬浮） -->
-        <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="16" Background="#00000000" Panel.ZIndex="50" IsHitTestVisible="False">
+        <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="16" Background="#00000000" Panel.ZIndex="9999" IsHitTestVisible="False">
             <Viewbox Width="260" Height="180">
                 <Grid>
                     <h:HelixViewport3D x:Name="PetView" ShowFrameRate="False" ShowViewCube="False" ZoomExtentsWhenLoaded="True" Background="#00FFFFFF">
