@@ -9,7 +9,7 @@
         <vlc:VideoView x:Name="VideoView" Panel.ZIndex="0" Background="Transparent"/>
 
         <!-- 2) 左上角天气叠加 -->
-        <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16" Padding="10" CornerRadius="8" Background="#66000000" Panel.ZIndex="1">
+        <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16" Padding="10" CornerRadius="8" Background="#66000000" Panel.ZIndex="50" IsHitTestVisible="False">
             <StackPanel>
                 <TextBlock x:Name="TxtCity" Text="城市: -" Foreground="White" FontSize="16" FontWeight="Bold"/>
                 <TextBlock x:Name="TxtWeather" Text="天气: -" Foreground="White" FontSize="14"/>
@@ -19,7 +19,7 @@
         </Border>
 
         <!-- 3) 右下角 3D 宠物（悬浮） -->
-        <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="16" Background="#00000000" Panel.ZIndex="1">
+        <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="16" Background="#00000000" Panel.ZIndex="50" IsHitTestVisible="False">
             <Viewbox Width="260" Height="180">
                 <Grid>
                     <h:HelixViewport3D x:Name="PetView" ShowFrameRate="False" ShowViewCube="False" ZoomExtentsWhenLoaded="True" Background="#00FFFFFF">
@@ -54,7 +54,7 @@
         </Border>
 
         <!-- 4) 控制条 -->
-        <DockPanel VerticalAlignment="Bottom" Background="#66000000" Height="56" Panel.ZIndex="1">
+        <DockPanel VerticalAlignment="Bottom" Background="#66000000" Height="56" Panel.ZIndex="10">
             <StackPanel Orientation="Horizontal" Margin="12,0" VerticalAlignment="Center">
                 <Button Content="打开" Click="BtnOpen_Click" Margin="0,0,8,0" Padding="10,4"/>
                 <Button Content="播放" Click="BtnPlay_Click" Margin="0,0,8,0" Padding="10,4"/>
