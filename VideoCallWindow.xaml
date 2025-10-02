@@ -5,7 +5,7 @@
         Title="视频通话"
         Height="640"
         Width="960"
-        WindowStartupLocation="CenterOwner"
+        WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
         WindowStyle="SingleBorderWindow"
         Background="Black">

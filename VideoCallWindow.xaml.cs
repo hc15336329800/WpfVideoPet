@@ -14,9 +14,17 @@ namespace WpfVideoPet
         private readonly VisitorClientLogic? _clientLogic;
         private bool _isPaused;
 
-        public VideoCallWindow(string? roleOverride = null)
+        public VideoCallWindow() : this(AppConfig.Load(null))
         {
-            _config = AppConfig.Load(roleOverride);
+        }
+
+        public VideoCallWindow(string? roleOverride) : this(AppConfig.Load(roleOverride))
+        {
+        }
+
+        private VideoCallWindow(AppConfig config)
+        {
+            _config = config;
 
             if (!_config.IsOperator)
             {
