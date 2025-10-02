@@ -95,6 +95,7 @@ namespace WpfVideoPet
             try
             {
                 await Web.EnsureCoreWebView2Async();
+                Web.CoreWebView2.PermissionRequested += CoreWebView2_PermissionRequested;
                 Web.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
 
                 //【新增 | 目的：确保页面注册好 message 监听后再发 join，避免首发丢失】
@@ -187,8 +188,20 @@ namespace WpfVideoPet
                         }
                         break;
                     case "client-error": //【新增 | 目的：让错误信息走现有提示管道】
-                        if (!_config.IsOperator)
+                        if (_config.IsOperator)
+                        {
+                            var errorMessage = root.TryGetProperty("message", out var errorElement)
+                                ? errorElement.GetString()
+                                : null;
+                            if (!string.IsNullOrWhiteSpace(errorMessage))
+                            {
+                                ShowClientNotification(errorMessage, MessageBoxImage.Error);
+                            }
+                        }
+                        else
+                        {
                             _clientLogic?.ProcessSignalMessage(type, root);
+                        }
                         break;
 
                     case "call-state":
@@ -305,7 +318,9 @@ namespace WpfVideoPet
             void Show()
             {
                 ClientStatusText.Text = message;
-                Title = $"视频客户端 - {message}";
+                Title = _config.IsOperator
+                    ? $"视频坐席端 - {message}"
+                    : $"视频客户端 - {message}";
                 var caption = image == MessageBoxImage.Error ? "错误" : "提示";
                 MessageBox.Show(this,
                     message,
@@ -407,8 +422,37 @@ namespace WpfVideoPet
             {
             }
 
+            try
+            {
+                if (Web?.CoreWebView2 != null)
+                {
+                    Web.CoreWebView2.PermissionRequested -= CoreWebView2_PermissionRequested;
+                }
+            }
+            catch
+            {
+            }
+
             base.OnClosing(e);
         }
+
+        private void CoreWebView2_PermissionRequested(object? sender, CoreWebView2PermissionRequestedEventArgs args)
+        {
+            if (args == null)
+            {
+                return;
+            }
+
+            switch (args.PermissionKind)
+            {
+                case CoreWebView2PermissionKind.Microphone:
+                case CoreWebView2PermissionKind.Camera:
+                case CoreWebView2PermissionKind.ScreenCapture:
+                    args.State = CoreWebView2PermissionState.Allow;
+                    break;
+            }
+        }
+
 
         private static Uri? TryGetLocalPageUri()
         {
