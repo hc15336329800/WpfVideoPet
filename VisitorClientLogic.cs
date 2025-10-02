@@ -50,10 +50,7 @@ namespace WpfVideoPet
                     var statusMessage = root.TryGetProperty("message", out var statusElement)
                         ? statusElement.GetString()
                         : null;
-                    if (!string.IsNullOrWhiteSpace(statusMessage))
-                    {
-                        StatusTextChanged?.Invoke(this, statusMessage);
-                    }
+                    HandleClientStatus(statusMessage);
                     break;
                 case "client-error":
                     var errorCode = root.TryGetProperty("code", out var codeElement)
@@ -161,6 +158,59 @@ namespace WpfVideoPet
             {
                 SetActiveCall(false);
             }
+        }
+
+        private void HandleClientStatus(string? statusMessage)
+        {
+            if (string.IsNullOrWhiteSpace(statusMessage))
+            {
+                return;
+            }
+
+            var trimmed = statusMessage.Trim();
+            var normalized = trimmed.ToLowerInvariant();
+
+            if (normalized is "ws-error"
+                or "signal-error"
+                or "join-timeout"
+                or "join-failed"
+                or "room-not-found"
+                or "unauthorized")
+            {
+                HandleClientEvent(normalized, null);
+                return;
+            }
+
+            StatusTextChanged?.Invoke(this, trimmed);
+
+            if (LooksLikeConnectionIssue(trimmed))
+            {
+                AlertRaised?.Invoke(this, trimmed);
+                SetActiveCall(false);
+                CloseRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        private static bool LooksLikeConnectionIssue(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return false;
+            }
+
+            var normalized = message.Trim().ToLowerInvariant();
+
+            return normalized.Contains("无法连接", StringComparison.Ordinal)
+                || normalized.Contains("未能连接", StringComparison.Ordinal)
+                || normalized.Contains("连接超时", StringComparison.Ordinal)
+                || normalized.Contains("超时", StringComparison.Ordinal)
+                || normalized.Contains("失败", StringComparison.Ordinal)
+                || normalized.Contains("错误", StringComparison.Ordinal)
+                || normalized.Contains("断开", StringComparison.Ordinal)
+                || normalized.Contains("房间", StringComparison.Ordinal)
+                || normalized.Contains("signal", StringComparison.Ordinal)
+                || normalized.Contains("server", StringComparison.Ordinal)
+                || normalized.Contains("error", StringComparison.Ordinal);
         }
 
         private void UpdateCallState(string? state)

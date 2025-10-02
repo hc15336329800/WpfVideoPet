@@ -266,7 +266,7 @@ namespace WpfVideoPet
                 return;
             }
 
-            Dispatcher.BeginInvoke(new Action(() =>
+            void Show()
             {
                 ClientStatusText.Text = message;
                 Title = $"视频客户端 - {message}";
@@ -276,7 +276,16 @@ namespace WpfVideoPet
                     caption,
                     MessageBoxButton.OK,
                     image);
-            }));
+            }
+
+            if (Dispatcher.CheckAccess())
+            {
+                Show();
+            }
+            else
+            {
+                Dispatcher.Invoke(Show);
+            }
         }
 
         private void SendJoinCommand()
