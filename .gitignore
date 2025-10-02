@@ -1,0 +1,33 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# 编译输出
+# 编译输出
+bin/
+obj/
+# 兼容解决方案/多项目子目录
+**/bin/
+**/obj/
+Debug/
+Release/
+[Bb]uild/
+artifacts/
+
+# 日志和缓存
+*.log
+*.tlog
+*.cache
+*.pdb
+
+# 发布文件
+publish/
+out/
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
