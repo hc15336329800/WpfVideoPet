@@ -13,12 +13,51 @@
         isPaused: false,
         callState: 'idle',
         expectingCloseSocket: null,
+        autoplayPrompted: false,
     };
 
     const statusBar = document.getElementById('statusBar');
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
     remoteVideo.srcObject = state.remoteStream;
+
+    function updateLocalPreviewVisibility() {
+        if (!localVideo) {
+            return;
+        }
+        if (state.role === 'operator') {
+            localVideo.classList.remove('hidden');
+        } else {
+            localVideo.classList.add('hidden');
+        }
+    }
+
+    function tryPlayRemoteStream() {
+        if (!remoteVideo || typeof remoteVideo.play !== 'function') {
+            return;
+        }
+        try {
+            const result = remoteVideo.play();
+            if (result && typeof result.then === 'function') {
+                result.catch((err) => {
+                    log('remote video autoplay blocked', err);
+                    if (state.autoplayPrompted) {
+                        return;
+                    }
+                    state.autoplayPrompted = true;
+                    if (state.role === 'operator') {
+                        updateStatusBar('访客视频已接通，如未听到声音请点击页面允许播放。');
+                    } else {
+                        setClientStatus('视频已接通，如未听到声音请点击页面允许播放。');
+                    }
+                });
+            }
+        } catch (err) {
+            log('remote video play error', err);
+        }
+    }
+
+    updateLocalPreviewVisibility();
 
     function log(...args) {
         console.log('[call]', ...args);
@@ -183,11 +222,12 @@
             if (remoteVideo && !remoteVideo.srcObject) {
                 remoteVideo.srcObject = state.remoteStream;
             }
+            tryPlayRemoteStream();
             if (state.role === 'operator') {
                 setOperatorState('in-call');
                 setCallState('active');
                 updateStatusBar('通话已建立');
-            } else {
+             } else {
                 setClientStatus('坐席已接通');
                 setCallState('active');
             }
@@ -493,7 +533,9 @@
         state.isPaused = false;
         state.pendingClientId = null;
         state.currentClientId = null;
+        state.autoplayPrompted = false;
         destroyPeerConnection(true);
+        updateLocalPreviewVisibility();
         if (state.role === 'operator') {
             updateStatusBar('正在初始化坐席端...');
         } else {
