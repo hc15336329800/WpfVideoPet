@@ -443,13 +443,11 @@ namespace WpfVideoPet
                 return;
             }
 
-            switch (args.PermissionKind)
+            if (args.PermissionKind == CoreWebView2PermissionKind.Microphone ||
+      args.PermissionKind == CoreWebView2PermissionKind.Camera ||
+      IsScreenCapturePermission(args.PermissionKind))
             {
-                case CoreWebView2PermissionKind.Microphone:
-                case CoreWebView2PermissionKind.Camera:
-                case CoreWebView2PermissionKind.ScreenCapture:
-                    args.State = CoreWebView2PermissionState.Allow;
-                    break;
+                args.State = CoreWebView2PermissionState.Allow;
             }
         }
 
@@ -468,8 +466,14 @@ namespace WpfVideoPet
             catch
             {
             }
-
             return null;
+        }
+
+        private static bool IsScreenCapturePermission(CoreWebView2PermissionKind permissionKind)
+        {
+            // Screen capture permission was introduced after some WebView2 releases.
+            // Compare using the enum name so the code continues to compile with older versions.
+            return string.Equals(permissionKind.ToString(), "ScreenCapture", StringComparison.Ordinal);
         }
     }
 }
