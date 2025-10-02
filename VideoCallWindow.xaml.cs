@@ -1,6 +1,7 @@
 ﻿using Microsoft.Web.WebView2.Core;
 using System;
 using System.ComponentModel;
+using System.IO;
 using System.Text.Json;
 using System.Windows;
 
@@ -106,7 +107,8 @@ namespace WpfVideoPet
                     }));
                 };
 
-                Web.Source = new Uri(_config.PageUrl);
+                var localPageUri = TryGetLocalPageUri();
+                Web.Source = localPageUri ?? new Uri(_config.PageUrl);
             }
             catch (Exception ex)
             {
@@ -328,16 +330,16 @@ namespace WpfVideoPet
             //【新增 | 目的：HTTPS 页面禁止信令用 ws://】
             try
             {
-                var pageScheme = new Uri(_config.PageUrl).Scheme;
+                var pageUri = Web?.Source ?? new Uri(_config.PageUrl);
                 var sigScheme = new Uri(_config.SignalServer).Scheme;
-                if (string.Equals(pageScheme, "https", StringComparison.OrdinalIgnoreCase) &&
+                if (string.Equals(pageUri.Scheme, "https", StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(sigScheme, "ws", StringComparison.OrdinalIgnoreCase))
                 {
                     ShowClientNotification("当前为 HTTPS 页面，但信令为 ws://，浏览器会拦截。请改用 wss:// 并确保证书主机名匹配。", MessageBoxImage.Error);
                     return;
                 }
             }
-            catch { /* 忽略解析异常 */ }
+             catch { /* 忽略解析异常 */ }
 
 
             if (Web?.CoreWebView2 == null)
@@ -406,6 +408,24 @@ namespace WpfVideoPet
             }
 
             base.OnClosing(e);
+        }
+
+        private static Uri? TryGetLocalPageUri()
+        {
+            try
+            {
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                var localPath = Path.Combine(baseDir, "Assets", "client2.html");
+                if (File.Exists(localPath))
+                {
+                    return new Uri(localPath);
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
         }
     }
 }

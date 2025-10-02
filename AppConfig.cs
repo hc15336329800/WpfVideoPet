@@ -99,6 +99,12 @@ namespace WpfVideoPet
                 config.PageUrl = "https://localhost";
             }
 
+            var localPagePath = Path.Combine(baseDir, "Assets", "client2.html");
+            if (File.Exists(localPagePath))
+            {
+                config.PageUrl = new Uri(localPagePath).AbsoluteUri;
+            }
+
             return config;
         }
 
@@ -118,8 +124,17 @@ namespace WpfVideoPet
 
             if (string.IsNullOrWhiteSpace(PageUrl))
             {
-                error = "视频页地址配置为空，请在 webrtcsettings.json 中正确配置。";
-                return false;
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                var localPagePath = Path.Combine(baseDir, "Assets", "client2.html");
+                if (File.Exists(localPagePath))
+                {
+                    PageUrl = new Uri(localPagePath).AbsoluteUri;
+                }
+                else
+                {
+                    error = "找不到本地视频页面资源，请确认 Assets/client2.html 是否存在。";
+                    return false;
+                }
             }
 
             error = null;

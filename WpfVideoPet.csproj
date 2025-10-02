@@ -1,12 +1,18 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <UseWPF>true</UseWPF>
-  </PropertyGroup>
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<UseWPF>true</UseWPF>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Content Include="Assets\**\*">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="HelixToolkit.Wpf" Version="2.27.3" />
@@ -26,8 +32,11 @@
 		</None>
 	</ItemGroup>
 
-	<Target Name="EnsureWpfVideoPetNotRunning" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
-		<Exec Command="taskkill /F /IM WpfVideoPet.exe" ContinueOnError="true" />
+	<Target Name="EnsureWpfVideoPetNotRunning"
+			BeforeTargets="Build"
+			Condition="'$(OS)' == 'Windows_NT'">
+		<Exec Command="taskkill /F /IM WpfVideoPet.exe"
+			  ContinueOnError="true" />
 	</Target>
 
 </Project>
