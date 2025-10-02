@@ -12,8 +12,8 @@ namespace WpfVideoPet
 {
     public partial class MainWindow : Window
     {
-        private LibVLC _libVlc;
-        private LibVLCSharp.Shared.MediaPlayer _player;
+        private readonly LibVLC _libVlc;
+        private readonly LibVLCSharp.Shared.MediaPlayer _player;
         private readonly DispatcherTimer _clockTimer;
         private readonly DispatcherTimer _petTimer;
         private double _angle;
@@ -28,6 +28,10 @@ namespace WpfVideoPet
         {
             InitializeComponent();
             Core.Initialize();
+
+            _libVlc = new LibVLC();
+            _player = new LibVLCSharp.Shared.MediaPlayer(_libVlc);
+
             _player.Volume = 60;
             _userPreferredVolume = _player.Volume;
             SetPlayerVolume(_player.Volume);
