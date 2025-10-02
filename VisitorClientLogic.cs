@@ -83,7 +83,7 @@ namespace WpfVideoPet
         {
             var payload = new
             {
-                cmd = "join",
+                type = "join",//【修改】cmd->type，服务端只识别 type
                 room = _config.Room,
                 ws = _config.SignalServer,
                 role = _config.Role,
@@ -100,7 +100,7 @@ namespace WpfVideoPet
                 throw new ArgumentException("命令不能为空。", nameof(command));
             }
 
-            var payload = new { cmd = command };
+            var payload = new { type = command };
             return JsonSerializer.Serialize(payload);
         }
 

@@ -87,6 +87,17 @@ namespace WpfVideoPet
             {
                 await Web.EnsureCoreWebView2Async();
                 Web.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
+
+                //【新增 | 目的：确保页面注册好 message 监听后再发 join，避免首发丢失】
+                Web.CoreWebView2.DOMContentLoaded += (_, __) =>
+                {
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        SendJoinCommand(); // 首发
+                        _ = Task.Delay(500).ContinueWith(_ => Dispatcher.BeginInvoke(new Action(SendJoinCommand))); // 兜底重发
+                    }));
+                };
+
                 Web.Source = new Uri(_config.PageUrl);
             }
             catch (Exception ex)
@@ -106,11 +117,21 @@ namespace WpfVideoPet
             if (e.IsSuccess)
             {
                 ClientStatusText.Text = "页面加载完成，等待信令...";
-                SendJoinCommand();
+                //SendJoinCommand();
             }
             else
             {
-                ClientStatusText.Text = "页面加载失败";
+                var errorStatus = e.WebErrorStatus;
+                var errorDetail = errorStatus != CoreWebView2WebErrorStatus.Unknown
+                    ? errorStatus.ToString()
+                    : "未知错误";
+                var message = $"页面加载失败：{errorDetail}";
+                ClientStatusText.Text = message;
+                MessageBox.Show(this,
+                    message,
+                    "页面加载失败",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
             }
         }
 
@@ -155,6 +176,11 @@ namespace WpfVideoPet
                             _clientLogic?.ProcessSignalMessage(type, root);
                         }
                         break;
+                    case "client-error": //【新增 | 目的：让错误信息走现有提示管道】
+                        if (!_config.IsOperator)
+                            _clientLogic?.ProcessSignalMessage(type, root);
+                        break;
+
                     case "call-state":
                         if (_config.IsOperator)
                         {
@@ -290,6 +316,22 @@ namespace WpfVideoPet
 
         private void SendJoinCommand()
         {
+
+            //【新增 | 目的：HTTPS 页面禁止信令用 ws://】
+            try
+            {
+                var pageScheme = new Uri(_config.PageUrl).Scheme;
+                var sigScheme = new Uri(_config.SignalServer).Scheme;
+                if (string.Equals(pageScheme, "https", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(sigScheme, "ws", StringComparison.OrdinalIgnoreCase))
+                {
+                    ShowClientNotification("当前为 HTTPS 页面，但信令为 ws://，浏览器会拦截。请改用 wss:// 并确保证书主机名匹配。", MessageBoxImage.Error);
+                    return;
+                }
+            }
+            catch { /* 忽略解析异常 */ }
+
+
             if (Web?.CoreWebView2 == null)
             {
                 return;
@@ -298,11 +340,11 @@ namespace WpfVideoPet
             var payloadJson = _clientLogic?.CreateJoinCommandPayload()
                 ?? JsonSerializer.Serialize(new
                 {
-                    cmd = "join",
+                    type = "join",
                     room = _config.Room,
                     ws = _config.SignalServer,
                     role = _config.Role,
-                    token = _config.OperatorToken
+                    token = _config.IsOperator ? _config.OperatorToken : null //【修改】仅坐席带 token
                 });
 
             Web.CoreWebView2.PostWebMessageAsJson(payloadJson);
@@ -316,7 +358,7 @@ namespace WpfVideoPet
             }
 
             var payloadJson = _clientLogic?.CreateSimpleCommandPayload(command)
-                ?? JsonSerializer.Serialize(new { cmd = command });
+                ?? JsonSerializer.Serialize(new { type = command });
             Web.CoreWebView2.PostWebMessageAsJson(payloadJson);
         }
 
