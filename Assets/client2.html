@@ -1,0 +1,54 @@
+﻿<!doctype html>
+<html lang="zh-CN" data-role="client2">
+<head>
+    <meta charset="utf-8" />
+    <title>访客端2</title>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            background: #000;
+            font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: #eee;
+        }
+
+        #container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+        }
+
+        #overlay {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.6);
+            padding: 12px 20px;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 16px;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 240px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <video id="remote" autoplay playsinline></video>
+        <div id="overlay">正在连接服务端...</div>
+    </div>
+    <script src="call.js"></script>
+</body>
+</html>

@@ -8,10 +8,6 @@
     <UseWPF>true</UseWPF>
   </PropertyGroup>
 
-  <ItemGroup>
-    <Folder Include="Assets\" />
-  </ItemGroup>
-
 	<ItemGroup>
 		<PackageReference Include="HelixToolkit.Wpf" Version="2.27.3" />
 		<PackageReference Include="LibVLCSharp.WPF" Version="3.9.4" />
@@ -30,11 +26,8 @@
 		</None>
 	</ItemGroup>
 
-	<Target Name="EnsureWpfVideoPetNotRunning"
-			BeforeTargets="Build"
-			Condition="'$(OS)' == 'Windows_NT'">
-		<Exec Command="taskkill /F /IM WpfVideoPet.exe"
-			  ContinueOnError="true" />
+	<Target Name="EnsureWpfVideoPetNotRunning" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
+		<Exec Command="taskkill /F /IM WpfVideoPet.exe" ContinueOnError="true" />
 	</Target>
 
 </Project>
