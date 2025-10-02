@@ -36,35 +36,11 @@ namespace WpfVideoPet
                 };
                 _clientLogic.InformationMessageRequested += (_, message) =>
                 {
-                    if (string.IsNullOrWhiteSpace(message))
-                    {
-                        return;
-                    }
-
-                    Dispatcher.BeginInvoke(new Action(() =>
-                    {
-                        MessageBox.Show(this,
-                            message,
-                            "提示",
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Information);
-                    }));
+                    ShowClientNotification(message, MessageBoxImage.Information);
                 };
                 _clientLogic.AlertRaised += (_, message) =>
                 {
-                    if (string.IsNullOrWhiteSpace(message))
-                    {
-                        return;
-                    }
-
-                    Dispatcher.BeginInvoke(new Action(() =>
-                    {
-                        MessageBox.Show(this,
-                            message,
-                            "提示",
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Information);
-                    }));
+                    ShowClientNotification(message, MessageBoxImage.Error);
                 };
                 _clientLogic.CloseRequested += (_, _) =>
                 {
@@ -281,6 +257,26 @@ namespace WpfVideoPet
                     _hasActiveCall = false;
                     break;
             }
+        }
+
+        private void ShowClientNotification(string? message, MessageBoxImage image)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                ClientStatusText.Text = message;
+                Title = $"视频客户端 - {message}";
+                var caption = image == MessageBoxImage.Error ? "错误" : "提示";
+                MessageBox.Show(this,
+                    message,
+                    caption,
+                    MessageBoxButton.OK,
+                    image);
+            }));
         }
 
         private void SendJoinCommand()

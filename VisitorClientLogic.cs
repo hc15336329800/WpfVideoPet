@@ -55,6 +55,15 @@ namespace WpfVideoPet
                         StatusTextChanged?.Invoke(this, statusMessage);
                     }
                     break;
+                case "client-error":
+                    var errorCode = root.TryGetProperty("code", out var codeElement)
+                        ? codeElement.GetString()
+                        : null;
+                    var errorMessage = root.TryGetProperty("message", out var errorElement)
+                        ? errorElement.GetString()
+                        : null;
+                    HandleClientEvent(errorCode ?? "client-error", errorMessage);
+                    break;
                 case "call-state":
                     var callState = root.TryGetProperty("state", out var callElement)
                         ? callElement.GetString()
@@ -100,21 +109,50 @@ namespace WpfVideoPet
 
         private void HandleClientEvent(string? evt, string? message)
         {
-            string display = message ?? evt switch
+            if (string.IsNullOrWhiteSpace(evt) && string.IsNullOrWhiteSpace(message))
             {
-                "busy" => "坐席正在忙碌，请稍后再试。",
-                "no-operator" => "坐席当前离线。",
-                "rejected" => "坐席已拒绝本次通话请求。",
-                "ended" => "通话已结束。",
-                _ => string.Empty
-            };
+                return;
+            }
+
+            string display = !string.IsNullOrWhiteSpace(message)
+                ? message!
+                : evt switch
+                {
+                    "busy" => "坐席正在忙碌，请稍后再试。",
+                    "no-operator" => "坐席当前离线。",
+                    "rejected" => "坐席已拒绝本次通话请求。",
+                    "ended" => "通话已结束。",
+                    "ws-error" or "signal-error" => "无法连接信令服务器，请检查 SIGNAL_SERVER 配置或网络是否畅通。",
+                    "join-timeout" or "join-failed" => "加入房间失败，请确认房间号和信令服务器状态。",
+                    "room-not-found" => "房间不存在，请检查房间号设置。",
+                    "unauthorized" => "房间鉴权失败，请确认访客访问凭证是否正确。",
+                    _ => string.Empty
+                };
+
+            bool isConnectionIssue = evt is "ws-error"
+                or "signal-error"
+                or "join-timeout"
+                or "join-failed"
+                or "room-not-found"
+                or "unauthorized"
+                or "client-error"
+                || (!string.IsNullOrWhiteSpace(evt) && evt.Contains("error", StringComparison.OrdinalIgnoreCase));
 
             if (!string.IsNullOrWhiteSpace(display))
             {
-                InformationMessageRequested?.Invoke(this, display);
+                StatusTextChanged?.Invoke(this, display);
+
+                if (isConnectionIssue)
+                {
+                    AlertRaised?.Invoke(this, display);
+                }
+                else
+                {
+                    InformationMessageRequested?.Invoke(this, display);
+                }
             }
 
-            if (evt is "busy" or "no-operator" or "rejected")
+            if (evt is "busy" or "no-operator" or "rejected" || isConnectionIssue)
             {
                 SetActiveCall(false);
                 CloseRequested?.Invoke(this, EventArgs.Empty);
