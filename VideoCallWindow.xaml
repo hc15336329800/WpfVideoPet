@@ -18,19 +18,23 @@
         <wv2:WebView2 x:Name="Web" Grid.Row="0" Margin="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
 
         <Border Grid.Row="1" Background="#AA000000" Padding="12">
-            <DockPanel>
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center" Spacing="8">
+            <DockPanel LastChildFill="False">
+                <!-- [修复] 防止最后一个子元素被填充撑满 -->
+                <!-- 左侧状态 -->
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
                     <TextBlock Text="状态:" Foreground="White" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="ClientStatusText" Text="正在初始化..." Foreground="White" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="ClientStatusText" Text="正在初始化..." Foreground="White" VerticalAlignment="Center" Margin="8,0,0,0"/>
                 </StackPanel>
 
-                <StackPanel x:Name="OperatorPanel" Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right" Spacing="8">
+                <!-- 右侧操作按钮 -->
+                <StackPanel x:Name="OperatorPanel" Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
                     <TextBlock x:Name="OperatorStatus" Text="空闲等待呼入" Foreground="White" VerticalAlignment="Center"/>
-                    <Button x:Name="AcceptButton" Content="接听" Width="80" Click="Accept_Click"/>
-                    <Button x:Name="RejectButton" Content="拒绝" Width="80" Click="Reject_Click"/>
-                    <Button x:Name="HangupButton" Content="挂断" Width="80" Click="Hangup_Click"/>
+                    <Button x:Name="AcceptButton" Content="接听" Width="80" Margin="8,0,0,0" Click="Accept_Click"/>
+                    <Button x:Name="RejectButton" Content="拒绝" Width="80" Margin="8,0,0,0" Click="Reject_Click"/>
+                    <Button x:Name="HangupButton" Content="挂断" Width="80" Margin="8,0,0,0" Click="Hangup_Click"/>
                 </StackPanel>
 
+                <!-- 暂停按钮 -->
                 <Button x:Name="PauseButton" Content="暂停" Width="80" DockPanel.Dock="Right" Margin="8,0,0,0" Click="PauseButton_Click"/>
             </DockPanel>
         </Border>
