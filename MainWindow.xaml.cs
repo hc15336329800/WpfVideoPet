@@ -19,13 +19,19 @@ namespace WpfVideoPet
         private double _angle;
         private OverlayWindow? _overlay;
         private SpeechRecognitionEngine? _speechRecognizer;
+        private readonly DispatcherTimer _volumeRestoreTimer;
+        private bool _suppressSliderCallback;
+        private bool _isDuckingAudio;
+        private int _userPreferredVolume;
 
         public MainWindow()
         {
             InitializeComponent();
             Core.Initialize();
-            _libVlc = new LibVLC();
-            _player = new LibVLCSharp.Shared.MediaPlayer(_libVlc);
+            _player.Volume = 60;
+            _userPreferredVolume = _player.Volume;
+            SetPlayerVolume(_player.Volume);
+
             VideoView.MediaPlayer = _player;
 
             _player.Volume = 60;
@@ -47,6 +53,12 @@ namespace WpfVideoPet
                 _overlay?.UpdatePetRotation(_angle);
             };
             _petTimer.Start();
+
+            _volumeRestoreTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1.5)
+            };
+            _volumeRestoreTimer.Tick += (_, __) => RestorePlayerVolume();
 
             InitializeSpeechRecognition();
         }
@@ -115,7 +127,23 @@ namespace WpfVideoPet
 
         private void BtnStop_Click(object sender, RoutedEventArgs e) => _player.Stop();
 
-        private void SldVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e) => _player.Volume = (int)e.NewValue;
+        private void SldVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_suppressSliderCallback)
+            {
+                return;
+            }
+
+            var desiredVolume = (int)e.NewValue;
+            _userPreferredVolume = desiredVolume;
+
+            if (_isDuckingAudio)
+            {
+                return;
+            }
+
+            SetPlayerVolume(desiredVolume, updateSlider: false);
+        }
 
         private void Window_KeyDown(object sender, KeyEventArgs e)
         {
@@ -163,6 +191,9 @@ namespace WpfVideoPet
                 var grammar = new Grammar(builder);
                 _speechRecognizer.LoadGrammar(grammar);
 
+                _speechRecognizer.SpeechDetected += SpeechRecognizerOnSpeechDetected;
+                _speechRecognizer.SpeechRecognitionRejected += SpeechRecognizerOnSpeechRecognitionRejected;
+                _speechRecognizer.RecognizeCompleted += SpeechRecognizerOnRecognizeCompleted;
                 _speechRecognizer.SpeechRecognized += SpeechRecognizerOnSpeechRecognized;
                 _speechRecognizer.SetInputToDefaultAudioDevice();
                 _speechRecognizer.RecognizeAsync(RecognizeMode.Multiple);
@@ -175,8 +206,9 @@ namespace WpfVideoPet
 
         private void SpeechRecognizerOnSpeechRecognized(object? sender, SpeechRecognizedEventArgs e)
         {
-            if (e.Result.Confidence < 0.7)
+            if (e.Result.Confidence < 0.55)
             {
+                Dispatcher.BeginInvoke(RestorePlayerVolume);
                 return;
             }
 
@@ -185,6 +217,8 @@ namespace WpfVideoPet
                 Dispatcher.Invoke(() =>
                     MessageBox.Show("helloworld", "提示", MessageBoxButton.OK, MessageBoxImage.Information));
             }
+
+            Dispatcher.BeginInvoke(RestorePlayerVolume);
         }
 
         private void LoadWeatherMock()
@@ -203,9 +237,14 @@ namespace WpfVideoPet
             if (_speechRecognizer != null)
             {
                 _speechRecognizer.SpeechRecognized -= SpeechRecognizerOnSpeechRecognized;
+                _speechRecognizer.SpeechDetected -= SpeechRecognizerOnSpeechDetected;
+                _speechRecognizer.SpeechRecognitionRejected -= SpeechRecognizerOnSpeechRecognitionRejected;
+                _speechRecognizer.RecognizeCompleted -= SpeechRecognizerOnRecognizeCompleted;
                 _speechRecognizer.RecognizeAsyncCancel();
                 _speechRecognizer.Dispose();
             }
+
+            _volumeRestoreTimer.Stop();
         }
 
         // 说明：此方法在你的构造函数事件绑定中被频繁调用，确保存在
@@ -218,5 +257,74 @@ namespace WpfVideoPet
             _overlay.Width = this.ActualWidth;
             _overlay.Height = this.ActualHeight;
         }
+
+        private void SpeechRecognizerOnSpeechDetected(object? sender, SpeechDetectedEventArgs e)
+        {
+            BeginAudioDucking();
+        }
+
+        private void SpeechRecognizerOnSpeechRecognitionRejected(object? sender, SpeechRecognitionRejectedEventArgs e)
+        {
+            Dispatcher.BeginInvoke(RestorePlayerVolume);
+        }
+
+        private void SpeechRecognizerOnRecognizeCompleted(object? sender, RecognizeCompletedEventArgs e)
+        {
+            Dispatcher.BeginInvoke(RestorePlayerVolume);
+        }
+
+        private void BeginAudioDucking()
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                _volumeRestoreTimer.Stop();
+
+                if (!_isDuckingAudio)
+                {
+                    _isDuckingAudio = true;
+                    var duckedVolume = Math.Max(5, _userPreferredVolume / 4);
+                    SetPlayerVolume(duckedVolume, updateUserPreferred: false);
+                }
+
+                _volumeRestoreTimer.Start();
+            }));
+        }
+
+        private void RestorePlayerVolume()
+        {
+            _volumeRestoreTimer.Stop();
+
+            if (!_isDuckingAudio)
+            {
+                return;
+            }
+
+            _isDuckingAudio = false;
+            SetPlayerVolume(_userPreferredVolume);
+        }
+
+        private void SetPlayerVolume(int volume, bool updateSlider = true, bool updateUserPreferred = true)
+        {
+            volume = Math.Clamp(volume, 0, 100);
+
+            if (_player.Volume != volume)
+            {
+                _player.Volume = volume;
+            }
+
+            if (updateSlider)
+            {
+                _suppressSliderCallback = true;
+                SldVolume.Value = volume;
+                _suppressSliderCallback = false;
+            }
+
+            if (updateUserPreferred)
+            {
+                _userPreferredVolume = volume;
+            }
+        }
     }
 }
+
+ 
