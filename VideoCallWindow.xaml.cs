@@ -14,7 +14,7 @@ namespace WpfVideoPet
         private readonly VisitorClientLogic? _clientLogic;
         private bool _isPaused;
 
-        public VideoCallWindow() : this(AppConfig.Load(null))
+         public VideoCallWindow() : this(AppConfig.Load(null))
         {
         }
 
