@@ -1,7 +1,18 @@
 {
+    "_comment": "示例配置：根据实际部署的信令服务和房间信息进行调整。",
+
     "role": "client",
+    "_comment_role": "角色标识：client 表示访客端，operator 表示坐席端。",
+
     "room": "demo-room",
+    "_comment_room": "房间号：访客与坐席需填写相同的房间名才能互通。",
+
     "signalServer": "wss://your-signal-server.example/ws",
+    "_comment_signalServer": "信令服务器 WebSocket 地址，例如 wss://example.com/ws。",
+
     "operatorToken": "",
-    "pageUrl": "https://your-webrtc-page.example/"
+    "_comment_operatorToken": "坐席端鉴权 Token（如需要），访客端可留空。",
+
+    "pageUrl": "https://your-webrtc-page.example/",
+    "_comment_pageUrl": "承载 WebRTC 前端页面的地址，将在 WebView2 中加载。"
 }
