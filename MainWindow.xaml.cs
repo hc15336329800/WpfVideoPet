@@ -19,6 +19,8 @@ namespace WpfVideoPet
         private double _angle;
         private OverlayWindow? _overlay;
         private SpeechRecognitionEngine? _speechRecognizer;
+        //  5 秒倒计时 压低声音
+        private static readonly TimeSpan VolumeRestoreDelay = TimeSpan.FromSeconds(5);
         private readonly DispatcherTimer _volumeRestoreTimer;
         private bool _suppressSliderCallback;
         private bool _isDuckingAudio;
@@ -60,7 +62,7 @@ namespace WpfVideoPet
 
             _volumeRestoreTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(1.5)
+                Interval = VolumeRestoreDelay
             };
             _volumeRestoreTimer.Tick += (_, __) => RestorePlayerVolume();
 
@@ -212,7 +214,7 @@ namespace WpfVideoPet
         {
             if (e.Result.Confidence < 0.55)
             {
-                Dispatcher.BeginInvoke(RestorePlayerVolume);
+                Dispatcher.BeginInvoke(new Action(ScheduleVolumeRestore));
                 return;
             }
 
@@ -222,7 +224,7 @@ namespace WpfVideoPet
                     MessageBox.Show("helloworld", "提示", MessageBoxButton.OK, MessageBoxImage.Information));
             }
 
-            Dispatcher.BeginInvoke(RestorePlayerVolume);
+            Dispatcher.BeginInvoke(new Action(ScheduleVolumeRestore));
         }
 
         private void LoadWeatherMock()
@@ -269,12 +271,12 @@ namespace WpfVideoPet
 
         private void SpeechRecognizerOnSpeechRecognitionRejected(object? sender, SpeechRecognitionRejectedEventArgs e)
         {
-            Dispatcher.BeginInvoke(RestorePlayerVolume);
+            Dispatcher.BeginInvoke(new Action(ScheduleVolumeRestore));
         }
 
         private void SpeechRecognizerOnRecognizeCompleted(object? sender, RecognizeCompletedEventArgs e)
         {
-            Dispatcher.BeginInvoke(RestorePlayerVolume);
+            Dispatcher.BeginInvoke(new Action(ScheduleVolumeRestore));
         }
 
         private void BeginAudioDucking()
@@ -290,9 +292,23 @@ namespace WpfVideoPet
                     SetPlayerVolume(duckedVolume, updateUserPreferred: false);
                 }
 
-                _volumeRestoreTimer.Start();
+                ScheduleVolumeRestore();
             }));
         }
+
+        // 设置压低声音时间？
+        private void ScheduleVolumeRestore()
+        {
+            if (!_isDuckingAudio)
+            {
+                return;
+            }
+
+            _volumeRestoreTimer.Stop();
+            _volumeRestoreTimer.Interval = VolumeRestoreDelay;
+            _volumeRestoreTimer.Start();
+        }
+
 
         private void RestorePlayerVolume()
         {
