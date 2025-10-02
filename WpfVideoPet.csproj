@@ -15,12 +15,19 @@
 	<ItemGroup>
 		<PackageReference Include="HelixToolkit.Wpf" Version="2.27.3" />
 		<PackageReference Include="LibVLCSharp.WPF" Version="3.9.4" />
+		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2592.51" />
 		<PackageReference Include="System.Speech" Version="9.0.9" />
 		<PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<Reference Include="System.Speech" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="webrtcsettings.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
 	</ItemGroup>
 
 	<Target Name="EnsureWpfVideoPetNotRunning"

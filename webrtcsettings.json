@@ -1,0 +1,7 @@
+{
+    "role": "client",
+    "room": "demo-room",
+    "signalServer": "wss://your-signal-server.example/ws",
+    "operatorToken": "",
+    "pageUrl": "https://your-webrtc-page.example/"
+}

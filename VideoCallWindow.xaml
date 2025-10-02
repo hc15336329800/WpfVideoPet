@@ -1,0 +1,38 @@
+﻿<Window x:Class="WpfVideoPet.VideoCallWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="视频通话"
+        Height="640"
+        Width="960"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        WindowStyle="SingleBorderWindow"
+        Background="Black">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <wv2:WebView2 x:Name="Web" Grid.Row="0" Margin="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+
+        <Border Grid.Row="1" Background="#AA000000" Padding="12">
+            <DockPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center" Spacing="8">
+                    <TextBlock Text="状态:" Foreground="White" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="ClientStatusText" Text="正在初始化..." Foreground="White" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <StackPanel x:Name="OperatorPanel" Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right" Spacing="8">
+                    <TextBlock x:Name="OperatorStatus" Text="空闲等待呼入" Foreground="White" VerticalAlignment="Center"/>
+                    <Button x:Name="AcceptButton" Content="接听" Width="80" Click="Accept_Click"/>
+                    <Button x:Name="RejectButton" Content="拒绝" Width="80" Click="Reject_Click"/>
+                    <Button x:Name="HangupButton" Content="挂断" Width="80" Click="Hangup_Click"/>
+                </StackPanel>
+
+                <Button x:Name="PauseButton" Content="暂停" Width="80" DockPanel.Dock="Right" Margin="8,0,0,0" Click="PauseButton_Click"/>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

@@ -18,6 +18,7 @@ namespace WpfVideoPet
         private readonly DispatcherTimer _petTimer;
         private double _angle;
         private OverlayWindow? _overlay;
+        private VideoCallWindow? _videoCallWindow;
         private SpeechRecognitionEngine? _speechRecognizer;
         //  5 秒倒计时 压低声音
         private static readonly TimeSpan VolumeRestoreDelay = TimeSpan.FromSeconds(5);
@@ -160,8 +161,8 @@ namespace WpfVideoPet
 
             if (e.Key == Key.F1)
             {
-                // F1 快捷键：立即显示 “helloworld”
-                MessageBox.Show("helloworld", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                // F1 快捷键：立即显示视频通话
+                ShowVideoCallWindow();
                 e.Handled = true;
                 return;
             }
@@ -220,8 +221,7 @@ namespace WpfVideoPet
 
             if (string.Equals(e.Result.Text, "蓝猫一号", StringComparison.Ordinal))
             {
-                Dispatcher.Invoke(() =>
-                    MessageBox.Show("helloworld", "提示", MessageBoxButton.OK, MessageBoxImage.Information));
+                Dispatcher.Invoke(ShowVideoCallWindow);
             }
 
             Dispatcher.BeginInvoke(new Action(ScheduleVolumeRestore));
@@ -236,6 +236,11 @@ namespace WpfVideoPet
         {
             base.OnClosed(e);
             _overlay?.Close();
+            if (_videoCallWindow != null)
+            {
+                _videoCallWindow.Close();
+                _videoCallWindow = null;
+            }
             _player?.Stop();
             _player?.Dispose();
             _libVlc?.Dispose();
@@ -344,7 +349,32 @@ namespace WpfVideoPet
                 _userPreferredVolume = volume;
             }
         }
+
+        private void ShowVideoCallWindow()
+        {
+            if (_videoCallWindow != null)
+            {
+                if (_videoCallWindow.IsVisible)
+                {
+                    if (_videoCallWindow.WindowState == WindowState.Minimized)
+                    {
+                        _videoCallWindow.WindowState = WindowState.Normal;
+                    }
+
+                    _videoCallWindow.Activate();
+                    return;
+                }
+
+                _videoCallWindow.Close();
+                _videoCallWindow = null;
+            }
+
+            _videoCallWindow = new VideoCallWindow
+            {
+                Owner = this
+            };
+            _videoCallWindow.Closed += (_, _) => _videoCallWindow = null;
+            _videoCallWindow.Show();
+        }
     }
 }
-
- 
