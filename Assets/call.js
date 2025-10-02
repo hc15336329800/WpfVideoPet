@@ -14,6 +14,7 @@
         callState: 'idle',
         expectingCloseSocket: null,
         autoplayPrompted: false,
+        pendingCandidates: [],
     };
 
     const statusBar = document.getElementById('statusBar');
@@ -161,6 +162,7 @@
             }
         }
         state.peer = null;
+        state.pendingCandidates = [];
         resetRemoteStream();
         if (stopLocal) {
             stopLocalStream();
@@ -279,11 +281,24 @@
             await peer.setRemoteDescription(new RTCSessionDescription(offer));
             const answer = await peer.createAnswer();
             await peer.setLocalDescription(answer);
+            flushPendingCandidates(peer);
             sendSignal('answer', answer);
         } catch (err) {
             log('failed to handle offer', err);
             emitClientError('answer-error', '处理远端 Offer 失败，请稍后重试。');
         }
+    }
+
+    function flushPendingCandidates(peer) {
+        if (!peer || !state.pendingCandidates.length) {
+            return;
+        }
+        const queued = state.pendingCandidates.splice(0);
+        queued.forEach((candidate) => {
+            peer.addIceCandidate(new RTCIceCandidate(candidate)).catch((err) => {
+                log('flush candidate failed', err);
+            });
+        });
     }
 
     async function handleAnswer(answer) {
@@ -293,13 +308,18 @@
         }
         try {
             await state.peer.setRemoteDescription(new RTCSessionDescription(answer));
+            flushPendingCandidates(state.peer);
         } catch (err) {
             log('failed to set remote answer', err);
         }
     }
 
     async function handleCandidate(candidate) {
-        if (!state.peer) {
+        if (!candidate) {
+            return;
+        }
+        if (!state.peer || !state.peer.remoteDescription) {
+            state.pendingCandidates.push(candidate);
             return;
         }
         try {
