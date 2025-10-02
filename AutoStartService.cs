@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 
-//开机自启
+//开机自启 
 public static class AutoStartService
 {
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
