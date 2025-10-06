@@ -25,6 +25,23 @@
             </StackPanel>
         </Border>
 
+        <Border x:Name="NotificationBorder"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                Margin="0,120,0,0"
+                Padding="12"
+                CornerRadius="6"
+                Background="#CC1E1E1E"
+                Visibility="Collapsed">
+            <TextBlock x:Name="TxtNotification"
+                       Foreground="White"
+                       FontSize="18"
+                       FontWeight="SemiBold"
+                       TextWrapping="Wrap"
+                       TextAlignment="Center"
+                       Text=""/>
+        </Border>
+
         <Border HorizontalAlignment="Right"
                 VerticalAlignment="Bottom"
                 Margin="16"

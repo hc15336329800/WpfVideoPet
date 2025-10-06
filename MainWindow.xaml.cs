@@ -514,6 +514,8 @@ namespace WpfVideoPet
                 Debug.WriteLine($"收到远程媒体任务: {task.JobId}, 即将解析媒体信息。");
                 var media = task.Media;
 
+                await Dispatcher.InvokeAsync(() => ShowIncomingMediaNotification(task));
+
                 var cached = await TryGetCachedMediaAsync(media).ConfigureAwait(false);
                 if (!string.IsNullOrEmpty(cached))
                 {
@@ -535,6 +537,38 @@ namespace WpfVideoPet
             catch (Exception ex)
             {
                 Debug.WriteLine($"处理远程媒体任务失败: {ex}");
+            }
+        }
+
+        private void ShowIncomingMediaNotification(RemoteMediaTask task)
+        {
+            var media = task.Media;
+            string? displayName = null;
+
+            if (!string.IsNullOrWhiteSpace(media?.MediaId))
+            {
+                displayName = media!.MediaId;
+            }
+            else if (!string.IsNullOrWhiteSpace(media?.JobId))
+            {
+                displayName = media!.JobId;
+            }
+            else if (!string.IsNullOrWhiteSpace(task.JobId))
+            {
+                displayName = task.JobId;
+            }
+
+            var message = string.IsNullOrWhiteSpace(displayName)
+                ? "收到新的远程视频任务，即将开始播放。"
+                : $"收到新的远程视频任务：{displayName}，即将开始播放。";
+
+            if (_overlay != null)
+            {
+                _overlay.ShowNotification(message, TimeSpan.FromSeconds(6));
+            }
+            else
+            {
+                MessageBox.Show(message, "远程视频", MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
 
