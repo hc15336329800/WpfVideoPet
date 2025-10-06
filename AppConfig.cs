@@ -12,6 +12,8 @@ namespace WpfVideoPet
         public string? OperatorToken { get; set; }
         public string PageUrl { get; set; } = "https://localhost";
 
+        public MqttConfig Mqtt { get; } = new();
+
         public bool IsOperator => string.Equals(Role, "operator", StringComparison.OrdinalIgnoreCase);
 
         public static AppConfig Load(string? roleOverride = null)
@@ -66,6 +68,64 @@ namespace WpfVideoPet
                         if (!string.IsNullOrWhiteSpace(value))
                         {
                             config.PageUrl = value.Trim();
+                        }
+                    }
+
+                    if (root.TryGetProperty("mqtt", out var mqttElement) && mqttElement.ValueKind == JsonValueKind.Object)
+                    {
+                        var mqtt = config.Mqtt;
+
+                        if (mqttElement.TryGetProperty("enabled", out var enabledElement) && enabledElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        {
+                            mqtt.Enabled = enabledElement.GetBoolean();
+                        }
+
+                        if (mqttElement.TryGetProperty("serverUri", out var serverUriElement))
+                        {
+                            var value = serverUriElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                mqtt.ServerUri = value.Trim();
+                            }
+                        }
+
+                        if (mqttElement.TryGetProperty("clientId", out var clientIdElement))
+                        {
+                            var value = clientIdElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                mqtt.ClientId = value.Trim();
+                            }
+                        }
+
+                        if (mqttElement.TryGetProperty("username", out var usernameElement))
+                        {
+                            mqtt.Username = usernameElement.GetString();
+                        }
+
+                        if (mqttElement.TryGetProperty("password", out var passwordElement))
+                        {
+                            mqtt.Password = passwordElement.GetString();
+                        }
+
+                        if (mqttElement.TryGetProperty("qos", out var qosElement) && qosElement.TryGetInt32(out var qosValue))
+                        {
+                            mqtt.Qos = Math.Clamp(qosValue, 0, 2);
+                        }
+
+                        if (mqttElement.TryGetProperty("cleanSession", out var cleanSessionElement) && cleanSessionElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        {
+                            mqtt.CleanSession = cleanSessionElement.GetBoolean();
+                        }
+
+                        if (mqttElement.TryGetProperty("keepAliveInterval", out var keepAliveElement) && keepAliveElement.TryGetInt32(out var keepAliveValue))
+                        {
+                            mqtt.KeepAliveInterval = Math.Max(0, keepAliveValue);
+                        }
+
+                        if (mqttElement.TryGetProperty("connectionTimeout", out var connectionTimeoutElement) && connectionTimeoutElement.TryGetInt32(out var timeoutValue))
+                        {
+                            mqtt.ConnectionTimeout = Math.Max(0, timeoutValue);
                         }
                     }
                 }
@@ -141,4 +201,53 @@ namespace WpfVideoPet
             return true;
         }
     }
+}
+
+public sealed class MqttConfig
+{
+    /// <summary>
+    /// 是否启用 MQTT 功能。
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// 服务器地址（例如 tcp://host:port）。
+    /// </summary>
+    public string ServerUri { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 平台为终端分配的 ClientId，用于连接与 Topic 拼接。
+    /// </summary>
+    public string ClientId { get; set; } = string.Empty;
+
+    public string? Username { get; set; }
+
+    public string? Password { get; set; }
+
+    /// <summary>
+    /// 消息服务质量，允许 0/1/2。
+    /// </summary>
+    public int Qos { get; set; } = 1;
+
+    public bool CleanSession { get; set; } = false;
+
+    /// <summary>
+    /// 心跳秒数。
+    /// </summary>
+    public int KeepAliveInterval { get; set; } = 60;
+
+    /// <summary>
+    /// 连接超时时间秒数。
+    /// </summary>
+    public int ConnectionTimeout { get; set; } = 10;
+
+    /// <summary>
+    /// 设备接收任务的 Topic（ts_{clientId}）。
+    /// </summary>
+    public string DownlinkTopic => string.IsNullOrWhiteSpace(ClientId) ? string.Empty : $"ts_{ClientId}";
+
+    /// <summary>
+    /// 设备上报执行结果的 Topic（tr_{clientId}）。
+    /// </summary>
+    public string UplinkTopic => string.IsNullOrWhiteSpace(ClientId) ? string.Empty : $"tr_{ClientId}";
 }

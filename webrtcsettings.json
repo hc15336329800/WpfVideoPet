@@ -14,5 +14,18 @@
     "_comment_operatorToken": "坐席端鉴权 Token（如需要），访客端可留空。",
 
     "pageUrl": "https://192.168.0.22/",
-    "_comment_pageUrl": "承载 WebRTC 前端页面的地址，将在 WebView2 中加载。"
+    "_comment_pageUrl": "承载 WebRTC 前端页面的地址，将在 WebView2 中加载。",
+
+    "mqtt": {
+        "_comment": "MQTT 对接配置，可根据后端平台的实际分配进行调整。",
+        "enabled": true,
+        "serverUri": "tcp://106.52.194.56:1883",
+        "clientId": "lanmao002",
+        "username": "admin",
+        "password": "admin",
+        "qos": 1,
+        "cleanSession": false,
+        "keepAliveInterval": 60,
+        "connectionTimeout": 10
+    }
 }

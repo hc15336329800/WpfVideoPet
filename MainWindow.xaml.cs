@@ -1,9 +1,15 @@
 ﻿using LibVLCSharp.Shared;
 using Microsoft.Win32;
 using System;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Speech.Recognition;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -26,10 +32,19 @@ namespace WpfVideoPet
         private bool _suppressSliderCallback;
         private bool _isDuckingAudio;
         private int _userPreferredVolume;
+        private readonly AppConfig _appConfig;
+        private MqttTaskService? _mqttService;
+        private readonly HttpClient _httpClient = new();
+        private readonly string _mediaCacheDirectory;
+        private readonly ConcurrentDictionary<string, Task> _mediaDownloadTasks = new(StringComparer.OrdinalIgnoreCase);
 
         public MainWindow()
         {
             InitializeComponent();
+            _appConfig = AppConfig.Load(null);
+            _mediaCacheDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "MediaCache");
+            Directory.CreateDirectory(_mediaCacheDirectory);
+
             Core.Initialize();
 
             _libVlc = new LibVLC();
@@ -48,6 +63,7 @@ namespace WpfVideoPet
             SizeChanged += (_, __) => UpdateOverlayBounds();
             StateChanged += (_, __) => UpdateOverlayBounds();
             Loaded += OnMainWindowLoaded;
+            Closed += OnMainWindowClosed;
 
             _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _clockTimer.Tick += (_, __) => _overlay?.UpdateTime($"时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
@@ -68,6 +84,7 @@ namespace WpfVideoPet
             _volumeRestoreTimer.Tick += (_, __) => RestorePlayerVolume();
 
             InitializeSpeechRecognition();
+            InitializeMqttService();
         }
 
         private void OnMainWindowLoaded(object sender, RoutedEventArgs e)
@@ -125,6 +142,26 @@ namespace WpfVideoPet
             }
 
             using var media = new Media(_libVlc, new Uri(path));
+            _player.Play(media);
+        }
+
+        /// <summary>
+        /// 播放远程媒体资源，使用 LibVLC 直接拉取流数据。
+        /// </summary>
+        /// <param name="url">媒体的 HTTP(s) 地址。</param>
+        private void PlayRemoteMedia(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return;
+            }
+
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            {
+                return;
+            }
+
+            using var media = new Media(_libVlc, uri);
             _player.Play(media);
         }
 
@@ -348,6 +385,333 @@ namespace WpfVideoPet
             {
                 _userPreferredVolume = volume;
             }
+        }
+
+
+        /// <summary>
+        /// 初始化 MQTT 服务，订阅任务下发主题。
+        /// </summary>
+        private void InitializeMqttService()
+        {
+            if (!_appConfig.Mqtt.Enabled)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_appConfig.Mqtt.ServerUri))
+            {
+                Debug.WriteLine("MQTT ServerUri 未配置，跳过初始化。");
+                return;
+            }
+
+            _mqttService = new MqttTaskService(_appConfig.Mqtt);
+            _mqttService.RemoteMediaTaskReceived += OnRemoteMediaTaskReceived;
+
+            _ = _mqttService.StartAsync().ContinueWith(task =>
+            {
+                if (task.Exception != null)
+                {
+                    Debug.WriteLine($"MQTT 连接失败: {task.Exception.GetBaseException().Message}");
+                }
+            }, TaskScheduler.Default);
+        }
+
+        /// <summary>
+        /// MQTT 收到远程媒体任务后的第一时间响应。
+        /// </summary>
+        private void OnRemoteMediaTaskReceived(object? sender, RemoteMediaTask task)
+        {
+            _ = Task.Run(() => HandleRemoteMediaTaskAsync(task));
+        }
+
+        /// <summary>
+        /// 处理单个远程媒体任务：优先播放本地缓存，再回落到在线播放并触发缓存。
+        /// </summary>
+        private async Task HandleRemoteMediaTaskAsync(RemoteMediaTask task)
+        {
+            try
+            {
+                var media = task.Media;
+
+                var cached = await TryGetCachedMediaAsync(media).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(cached))
+                {
+                    await Dispatcher.InvokeAsync(() => PlayFile(cached));
+                    return;
+                }
+
+                var playbackUrl = !string.IsNullOrWhiteSpace(media.AccessibleUrl)
+                    ? media.AccessibleUrl
+                    : media.DownloadUrl;
+
+                if (!string.IsNullOrWhiteSpace(playbackUrl))
+                {
+                    await Dispatcher.InvokeAsync(() => PlayRemoteMedia(playbackUrl!));
+                }
+
+                await CacheMediaAsync(task).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"处理远程媒体任务失败: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// 检查并验证缓存文件是否可用。
+        /// </summary>
+        private async Task<string?> TryGetCachedMediaAsync(RemoteMediaInfo media)
+        {
+            var cachePath = BuildCachePath(media);
+            if (!File.Exists(cachePath))
+            {
+                return null;
+            }
+
+            if (media.FileSize.HasValue)
+            {
+                var length = new FileInfo(cachePath).Length;
+                if (length != media.FileSize.Value)
+                {
+                    try
+                    {
+                        File.Delete(cachePath);
+                    }
+                    catch (IOException)
+                    {
+                    }
+
+                    return null;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(media.FileHash))
+            {
+                var valid = await VerifyFileHashAsync(cachePath, media.FileHash!).ConfigureAwait(false);
+                if (!valid)
+                {
+                    try
+                    {
+                        File.Delete(cachePath);
+                    }
+                    catch (IOException)
+                    {
+                    }
+
+                    return null;
+                }
+            }
+
+            return cachePath;
+        }
+
+        /// <summary>
+        /// 后台下载媒体文件并写入本地缓存。
+        /// </summary>
+        private async Task CacheMediaAsync(RemoteMediaTask task)
+        {
+            var media = task.Media;
+            var downloadUrl = !string.IsNullOrWhiteSpace(media.DownloadUrl)
+                ? media.DownloadUrl
+                : media.AccessibleUrl;
+
+            if (string.IsNullOrWhiteSpace(downloadUrl))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(_mediaCacheDirectory);
+
+            var existing = await TryGetCachedMediaAsync(media).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(existing))
+            {
+                return;
+            }
+
+            var targetPath = BuildCachePath(media);
+            var cacheKey = targetPath;
+
+            if (_mediaDownloadTasks.TryGetValue(cacheKey, out var existingTask))
+            {
+                await existingTask.ConfigureAwait(false);
+                return;
+            }
+
+            var downloadTask = DownloadAndStoreAsync(downloadUrl!, targetPath, media);
+            if (!_mediaDownloadTasks.TryAdd(cacheKey, downloadTask))
+            {
+                downloadTask = _mediaDownloadTasks[cacheKey];
+            }
+
+            try
+            {
+                await downloadTask.ConfigureAwait(false);
+            }
+            finally
+            {
+                _mediaDownloadTasks.TryRemove(cacheKey, out _);
+            }
+        }
+
+        /// <summary>
+        /// 拉取远程媒体并在校验后保存到目标路径。
+        /// </summary>
+        private async Task DownloadAndStoreAsync(string url, string targetPath, RemoteMediaInfo media)
+        {
+            var tempPath = targetPath + ".downloading";
+
+            try
+            {
+                using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+
+                await using var remoteStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                await using var fileStream = File.Create(tempPath);
+                await remoteStream.CopyToAsync(fileStream).ConfigureAwait(false);
+
+                if (media.FileSize.HasValue)
+                {
+                    var actualLength = new FileInfo(tempPath).Length;
+                    if (actualLength != media.FileSize.Value)
+                    {
+                        throw new InvalidOperationException($"文件大小与描述不一致（期望 {media.FileSize.Value}，实际 {actualLength}）。");
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(media.FileHash))
+                {
+                    var valid = await VerifyFileHashAsync(tempPath, media.FileHash!).ConfigureAwait(false);
+                    if (!valid)
+                    {
+                        throw new InvalidOperationException("文件哈希校验失败。");
+                    }
+                }
+
+                if (File.Exists(targetPath))
+                {
+                    File.Delete(targetPath);
+                }
+
+                File.Move(tempPath, targetPath);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"缓存媒体文件失败: {ex.Message}");
+                try
+                {
+                    if (File.Exists(tempPath))
+                    {
+                        File.Delete(tempPath);
+                    }
+                }
+                catch (IOException)
+                {
+                }
+            }
+        }
+
+        /// <summary>
+        /// 根据媒体标识生成稳定的缓存路径。
+        /// </summary>
+        private string BuildCachePath(RemoteMediaInfo media)
+        {
+            var key = !string.IsNullOrWhiteSpace(media.FileHash)
+                ? media.FileHash
+                : (!string.IsNullOrWhiteSpace(media.MediaId) ? media.MediaId : null);
+
+            if (string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(media.JobId))
+            {
+                key = media.JobId;
+            }
+
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                var source = media.DownloadUrl ?? media.AccessibleUrl ?? media.JobId ?? "remote_media";
+                key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
+            }
+
+            key = SanitizeFileName(key);
+            var extension = ResolveMediaExtension(media);
+            return Path.Combine(_mediaCacheDirectory, $"{key}{extension}");
+        }
+
+        /// <summary>
+        /// 从媒体下载地址推断文件扩展名，默认使用 mp4。
+        /// </summary>
+        private static string ResolveMediaExtension(RemoteMediaInfo media)
+        {
+            static string? TryGetExtension(string? url)
+            {
+                if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                {
+                    return null;
+                }
+
+                var ext = Path.GetExtension(uri.AbsolutePath);
+                return string.IsNullOrWhiteSpace(ext) ? null : ext;
+            }
+
+            return TryGetExtension(media.DownloadUrl) ?? TryGetExtension(media.AccessibleUrl) ?? ".mp4";
+        }
+
+        /// <summary>
+        /// 将非法文件名字符替换为下划线。
+        /// </summary>
+        private static string SanitizeFileName(string value)
+        {
+            foreach (var invalid in Path.GetInvalidFileNameChars())
+            {
+                value = value.Replace(invalid, '_');
+            }
+
+            return value;
+        }
+
+        /// <summary>
+        /// 校验文件的 SHA-256 哈希是否与预期一致。
+        /// </summary>
+        private static async Task<bool> VerifyFileHashAsync(string filePath, string expectedHash)
+        {
+            try
+            {
+                await using var stream = File.OpenRead(filePath);
+                using var sha256 = SHA256.Create();
+                var hash = await sha256.ComputeHashAsync(stream).ConfigureAwait(false);
+                var actual = Convert.ToHexString(hash);
+                return string.Equals(actual, expectedHash, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 主窗口关闭时释放 MQTT 与网络资源。
+        /// </summary>
+        private async void OnMainWindowClosed(object? sender, EventArgs e)
+        {
+            Closed -= OnMainWindowClosed;
+
+            if (_mqttService != null)
+            {
+                _mqttService.RemoteMediaTaskReceived -= OnRemoteMediaTaskReceived;
+
+                try
+                {
+                    await _mqttService.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"释放 MQTT 服务时发生异常: {ex.Message}");
+                }
+            }
+
+            _httpClient.Dispose();
         }
 
         private void ShowVideoCallWindow()
