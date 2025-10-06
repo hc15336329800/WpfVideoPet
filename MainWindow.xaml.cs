@@ -46,7 +46,11 @@ namespace WpfVideoPet
             InitializeComponent();
             _appConfig = AppConfig.Load(null);
             _audioDuckingConfig = _appConfig.AudioDucking;
-            _mediaCacheDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "MediaCache");
+            var cacheRoot = Path.Combine(
+                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                 "WpfVideoPet",
+                 "MediaCache");
+            _mediaCacheDirectory = cacheRoot;
             Directory.CreateDirectory(_mediaCacheDirectory);
 
             Core.Initialize();
@@ -550,7 +554,14 @@ namespace WpfVideoPet
                 }
 
                 // 远程拉流前先尝试完整下载，确保后续能以本地文件循环播放
-                await CacheMediaAsync(task).ConfigureAwait(false);
+                try
+                {
+                    await CacheMediaAsync(task).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"缓存远程媒体时出现异常: {ex.Message}");
+                }
 
                 cached = await TryGetCachedMediaAsync(media).ConfigureAwait(false);
                 if (!string.IsNullOrEmpty(cached))
