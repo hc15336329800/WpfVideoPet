@@ -37,6 +37,9 @@ namespace WpfVideoPet
         private readonly HttpClient _httpClient = new();
         private readonly string _mediaCacheDirectory;
         private readonly ConcurrentDictionary<string, Task> _mediaDownloadTasks = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _playbackStateLock = new();
+        private string? _currentLocalMediaPath;
+        private string? _currentRemoteMediaUrl;
 
         public MainWindow()
         {
@@ -50,6 +53,7 @@ namespace WpfVideoPet
 
             _libVlc = new LibVLC();
             _player = new LibVLCSharp.Shared.MediaPlayer(_libVlc);
+            _player.EndReached += OnPlayerEndReached;
 
             _player.Volume = 60;
             _userPreferredVolume = _player.Volume;
@@ -142,8 +146,14 @@ namespace WpfVideoPet
                 return;
             }
 
+            lock (_playbackStateLock)
+            {
+                // 记录当前正在播放的本地文件路径，EndReached 时优先重播该文件
+                _currentLocalMediaPath = path;
+                _currentRemoteMediaUrl = null;
+            }
 
-            //修改为循环播放（优先本地文件）
+            // 修改为循环播放（优先本地文件）
             using var media = new Media(_libVlc, new Uri(path));
             media.AddOption(":input-repeat=-1");
             _player.Play(media);
@@ -165,12 +175,18 @@ namespace WpfVideoPet
                 return;
             }
 
-            //修改为循环播放（优先本地文件）
+            lock (_playbackStateLock)
+            {
+                // 记录当前远程流地址，若本地缓存不可用则在播放结束后重新拉流
+                _currentRemoteMediaUrl = url;
+                _currentLocalMediaPath = null;
+            }
+
+            // 修改为循环播放（优先本地文件）
             using var media = new Media(_libVlc, uri);
             media.AddOption(":input-repeat=-1");
             _player.Play(media);
         }
-
         private void BtnPlay_Click(object sender, RoutedEventArgs e) => _player.SetPause(false);
 
         private void BtnPause_Click(object sender, RoutedEventArgs e) => _player.Pause();
@@ -285,6 +301,11 @@ namespace WpfVideoPet
                 _videoCallWindow = null;
             }
             _player?.Stop();
+            if (_player != null)
+            {
+                // 解除事件订阅，避免窗口销毁后仍收到回调
+                _player.EndReached -= OnPlayerEndReached;
+            }
             _player?.Dispose();
             _libVlc?.Dispose();
 
@@ -528,6 +549,16 @@ namespace WpfVideoPet
                     return;
                 }
 
+                // 远程拉流前先尝试完整下载，确保后续能以本地文件循环播放
+                await CacheMediaAsync(task).ConfigureAwait(false);
+
+                cached = await TryGetCachedMediaAsync(media).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(cached))
+                {
+                    await Dispatcher.InvokeAsync(() => PlayFile(cached));
+                    return;
+                }
+
                 var playbackUrl = !string.IsNullOrWhiteSpace(media.AccessibleUrl)
                     ? media.AccessibleUrl
                     : media.DownloadUrl;
@@ -536,12 +567,36 @@ namespace WpfVideoPet
                 {
                     await Dispatcher.InvokeAsync(() => PlayRemoteMedia(playbackUrl!));
                 }
-
-                await CacheMediaAsync(task).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"处理远程媒体任务失败: {ex}");
+            }
+        }
+
+        private void OnPlayerEndReached(object? sender, EventArgs e)
+        {
+            string? localPath;
+            string? remoteUrl;
+
+            lock (_playbackStateLock)
+            {
+                // 拷贝一次播放状态快照，避免事件线程与主线程竞争
+                localPath = _currentLocalMediaPath;
+                remoteUrl = _currentRemoteMediaUrl;
+            }
+
+            if (!string.IsNullOrEmpty(localPath) && File.Exists(localPath))
+            {
+                // 如果本地缓存已就绪，则重新调用 PlayFile 形成稳定的循环
+                Dispatcher.InvokeAsync(() => PlayFile(localPath));
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(remoteUrl))
+            {
+                // 若本地缓存暂不可用，则回退到重新拉流，保持播放不断档
+                Dispatcher.InvokeAsync(() => PlayRemoteMedia(remoteUrl));
             }
         }
 
