@@ -142,7 +142,10 @@ namespace WpfVideoPet
                 return;
             }
 
+
+            //修改为循环播放（优先本地文件）
             using var media = new Media(_libVlc, new Uri(path));
+            media.AddOption(":input-repeat=-1");
             _player.Play(media);
         }
 
@@ -162,7 +165,9 @@ namespace WpfVideoPet
                 return;
             }
 
+            //修改为循环播放（优先本地文件）
             using var media = new Media(_libVlc, uri);
+            media.AddOption(":input-repeat=-1");
             _player.Play(media);
         }
 
