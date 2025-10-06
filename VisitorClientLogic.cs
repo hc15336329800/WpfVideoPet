@@ -238,8 +238,14 @@ namespace WpfVideoPet
                 return;
             }
 
+            var wasActive = HasActiveCall;
             HasActiveCall = isActive;
             CallStateChanged?.Invoke(this, isActive);
+
+            if (!isActive && wasActive)
+            {
+                CloseRequested?.Invoke(this, EventArgs.Empty);
+            }
         }
     }
 }

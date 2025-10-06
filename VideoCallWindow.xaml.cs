@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Threading;
 
 namespace WpfVideoPet
 {
@@ -14,8 +15,11 @@ namespace WpfVideoPet
         private bool _hasActiveCall;
         private readonly VisitorClientLogic? _clientLogic;
         private bool _isPaused;
+        private readonly DispatcherTimer? _ringTimeoutTimer;
+        private bool _ringTimeoutStarted;
+        private string? _lastNotificationSignature;
 
-         public VideoCallWindow() : this(AppConfig.Load(null))
+        public VideoCallWindow() : this(AppConfig.Load(null))
         {
         }
 
@@ -30,6 +34,11 @@ namespace WpfVideoPet
             if (!_config.IsOperator)
             {
                 _clientLogic = new VisitorClientLogic(_config);
+                _ringTimeoutTimer = new DispatcherTimer
+                {
+                    Interval = TimeSpan.FromMinutes(1)
+                };
+                _ringTimeoutTimer.Tick += RingTimeoutTimer_Tick;
                 _clientLogic.StatusTextChanged += (_, message) =>
                 {
                     if (string.IsNullOrWhiteSpace(message))
@@ -53,12 +62,20 @@ namespace WpfVideoPet
                 };
                 _clientLogic.CloseRequested += (_, _) =>
                 {
-                    Dispatcher.BeginInvoke(new Action(Close));
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        StopRingTimeout();
+                        Close();
+                    }));
                 };
                 _clientLogic.CallStateChanged += (_, active) =>
                 {
                     Dispatcher.BeginInvoke(new Action(() =>
                     {
+                        if (active)
+                        {
+                            StopRingTimeout();
+                        }
                         _hasActiveCall = active;
                     }));
                 };
@@ -315,12 +332,21 @@ namespace WpfVideoPet
                 return;
             }
 
+            var signature = $"{image}:{message}";
+            var showDialog = !string.Equals(_lastNotificationSignature, signature, StringComparison.Ordinal);
+            _lastNotificationSignature = signature;
+
             void Show()
             {
                 ClientStatusText.Text = message;
                 Title = _config.IsOperator
                     ? $"视频坐席端 - {message}"
                     : $"视频客户端 - {message}";
+                if (!showDialog)
+                {
+                    return;
+                }
+
                 var caption = image == MessageBoxImage.Error ? "错误" : "提示";
                 MessageBox.Show(this,
                     message,
@@ -328,7 +354,6 @@ namespace WpfVideoPet
                     MessageBoxButton.OK,
                     image);
             }
-
             if (Dispatcher.CheckAccess())
             {
                 Show();
@@ -363,15 +388,16 @@ namespace WpfVideoPet
             }
 
             var payloadJson = _clientLogic?.CreateJoinCommandPayload()
-                ?? JsonSerializer.Serialize(new
-                {
-                    type = "join",
-                    room = _config.Room,
-                    ws = _config.SignalServer,
-                    role = _config.Role,
-                    token = _config.IsOperator ? _config.OperatorToken : null //【修改】仅坐席带 token
-                });
+                 ?? JsonSerializer.Serialize(new
+                 {
+                     type = "join",
+                     room = _config.Room,
+                     ws = _config.SignalServer,
+                     role = _config.Role,
+                     token = _config.IsOperator ? _config.OperatorToken : null //【修改】仅坐席带 token
+                 });
 
+            StartRingTimeout();
             Web.CoreWebView2.PostWebMessageAsJson(payloadJson);
         }
 
@@ -413,6 +439,7 @@ namespace WpfVideoPet
         {
             try
             {
+                StopRingTimeout();
                 if (_pageReady && _hasActiveCall)
                 {
                     SendSimpleCommand("hangup");
@@ -474,6 +501,56 @@ namespace WpfVideoPet
             // Screen capture permission was introduced after some WebView2 releases.
             // Compare using the enum name so the code continues to compile with older versions.
             return string.Equals(permissionKind.ToString(), "ScreenCapture", StringComparison.Ordinal);
+        }
+
+        private void StartRingTimeout()
+        {
+            if (_config.IsOperator || _ringTimeoutTimer == null || _ringTimeoutStarted)
+            {
+                return;
+            }
+
+            _ringTimeoutStarted = true;
+            _ringTimeoutTimer.Stop();
+            _ringTimeoutTimer.Start();
+        }
+
+        private void StopRingTimeout()
+        {
+            if (_ringTimeoutTimer == null)
+            {
+                return;
+            }
+
+            _ringTimeoutTimer.Stop();
+            _ringTimeoutStarted = false;
+        }
+
+        private void RingTimeoutTimer_Tick(object? sender, EventArgs e)
+        {
+            if (_ringTimeoutTimer == null)
+            {
+                return;
+            }
+
+            _ringTimeoutTimer.Stop();
+            _ringTimeoutStarted = false;
+
+            if (_config.IsOperator || _hasActiveCall)
+            {
+                return;
+            }
+
+            try
+            {
+                SendSimpleCommand("hangup");
+            }
+            catch
+            {
+            }
+
+            ShowClientNotification("坐席暂未接听，本次呼叫已结束。", MessageBoxImage.Information);
+            Close();
         }
     }
 }
