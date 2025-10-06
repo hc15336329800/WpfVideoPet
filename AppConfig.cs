@@ -97,6 +97,16 @@ namespace WpfVideoPet
                             {
                                 mqtt.ClientId = value.Trim();
                             }
+                            else
+                            {
+                                mqtt.ClientId = "lanmao001";
+                            }
+                        }
+
+                        if (mqttElement.TryGetProperty("topic", out var topicElement))
+                        {
+                            var value = topicElement.GetString();
+                            mqtt.DefaultTopic = string.IsNullOrWhiteSpace(value) ? null : value!.Trim();
                         }
 
                         if (mqttElement.TryGetProperty("username", out var usernameElement))
@@ -236,8 +246,16 @@ public sealed class MqttConfig
 
     /// <summary>
     /// 平台为终端分配的 ClientId，用于连接与 Topic 拼接。
+    /// 默认值为 "lanmao001"，便于开箱即用地测试当前车辆。
     /// </summary>
-    public string ClientId { get; set; } = string.Empty;
+    public string ClientId { get; set; } = "lanmao001";
+
+    /// <summary>
+    /// 默认的 MQTT 主题，收发消息均会使用该主题。
+    /// 为空时会退回到基于 ClientId 的 ts_/tr_ 主题组合。
+    /// </summary>
+    public string? DefaultTopic { get; set; } = "ts_lanmao001";
+
 
     public string? Username { get; set; }
 
@@ -263,13 +281,36 @@ public sealed class MqttConfig
     /// <summary>
     /// 设备接收任务的 Topic（ts_{clientId}）。
     /// </summary>
-    public string DownlinkTopic => string.IsNullOrWhiteSpace(ClientId) ? string.Empty : $"ts_{ClientId}";
+    public string DownlinkTopic
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(DefaultTopic))
+            {
+                return DefaultTopic!;
+            }
+
+            return string.IsNullOrWhiteSpace(ClientId) ? string.Empty : $"ts_{ClientId}";
+        }
+    }
 
     /// <summary>
     /// 设备上报执行结果的 Topic（tr_{clientId}）。
     /// </summary>
-    public string UplinkTopic => string.IsNullOrWhiteSpace(ClientId) ? string.Empty : $"tr_{ClientId}";
+    public string UplinkTopic
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(DefaultTopic))
+            {
+                return DefaultTopic!;
+            }
+
+            return string.IsNullOrWhiteSpace(ClientId) ? string.Empty : $"tr_{ClientId}";
+        }
+    }
 }
+
 
 public sealed class AudioDuckingConfig
 {

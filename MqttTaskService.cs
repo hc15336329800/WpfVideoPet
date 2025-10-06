@@ -8,6 +8,8 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text;
+using System.Windows;
 
 namespace WpfVideoPet
 {
@@ -161,6 +163,9 @@ namespace WpfVideoPet
                     return Task.CompletedTask;
                 }
 
+                // 先弹出原始消息内容，便于测试订阅主题是否收到数据。
+                ShowIncomingMessagePopup(segment.Value);
+
                 var message = JsonSerializer.Deserialize<TaskDownlinkMessage>(segment.Value.AsSpan(), _serializerOptions);
                 if (message == null || string.IsNullOrWhiteSpace(message.JobId))
                 {
@@ -212,6 +217,44 @@ namespace WpfVideoPet
             }
 
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 通过 UI 线程弹窗展示 MQTT 收到的原始消息，便于快速验证通信链路。
+        /// </summary>
+        /// <param name="payload">MQTT 消息负载。</param>
+        private void ShowIncomingMessagePopup(ArraySegment<byte> payload)
+        {
+            if (payload.Array is null)
+            {
+                return;
+            }
+
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher == null)
+            {
+                return;
+            }
+
+            var text = Encoding.UTF8.GetString(payload.Array, payload.Offset, payload.Count);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                text = "(收到空消息)";
+            }
+
+            void ShowDialog()
+            {
+                MessageBox.Show(text, "MQTT 测试消息", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+
+            if (dispatcher.CheckAccess())
+            {
+                ShowDialog();
+            }
+            else
+            {
+                dispatcher.BeginInvoke((Action)ShowDialog);
+            }
         }
 
         public async ValueTask DisposeAsync()
