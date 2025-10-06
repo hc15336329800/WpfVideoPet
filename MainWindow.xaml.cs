@@ -26,6 +26,7 @@ namespace WpfVideoPet
         private OverlayWindow? _overlay;
         private VideoCallWindow? _videoCallWindow;
         private SpeechRecognitionEngine? _speechRecognizer;
+        private const double WakeWordConfidenceThreshold = 0.45;
         //  5 秒倒计时 压低声音
         private static readonly TimeSpan VolumeRestoreDelay = TimeSpan.FromSeconds(5);
         private readonly DispatcherTimer _volumeRestoreTimer;
@@ -250,15 +251,15 @@ namespace WpfVideoPet
 
         private void SpeechRecognizerOnSpeechRecognized(object? sender, SpeechRecognizedEventArgs e)
         {
-            if (e.Result.Confidence < 0.55)
+            if (e.Result.Confidence < WakeWordConfidenceThreshold)
             {
                 Dispatcher.BeginInvoke(new Action(ScheduleVolumeRestore));
                 return;
             }
 
-            if (string.Equals(e.Result.Text, "蓝猫一号", StringComparison.Ordinal))
+            if (IsWakePhrase(e.Result.Text))
             {
-                Dispatcher.Invoke(ShowVideoCallWindow);
+                Dispatcher.BeginInvoke(new Action(ShowVideoCallWindow));
             }
 
             Dispatcher.BeginInvoke(new Action(ScheduleVolumeRestore));
@@ -308,6 +309,8 @@ namespace WpfVideoPet
 
         private void SpeechRecognizerOnSpeechDetected(object? sender, SpeechDetectedEventArgs e)
         {
+            // 最新需求：识别到“蓝猫一号”时不再压低播放音量。
+            // 这里仍沿用原有的语音检测节奏，但 BeginAudioDucking 仅用于维持状态机而不再改变音量。
             BeginAudioDucking();
         }
 
@@ -345,16 +348,57 @@ namespace WpfVideoPet
         {
             Dispatcher.BeginInvoke(new Action(() =>
             {
-                // 根据最新需求，识别到 “蓝猫一号” 时不再压低播放音量。
-                // 因此，这里仅确保相关定时器状态被复位，而不再修改播放器音量。
                 _volumeRestoreTimer.Stop();
 
-                if (_isDuckingAudio)
+                if (!_isDuckingAudio)
                 {
-                    _isDuckingAudio = false;
-                    SetPlayerVolume(_userPreferredVolume);
+                    _isDuckingAudio = true;
                 }
+
+                ScheduleVolumeRestore();
             }));
+        }
+
+        private static bool IsWakePhrase(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            var normalized = NormalizeWakeText(text);
+            if (string.Equals(normalized, "蓝猫一号", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            return string.Equals(normalized, "蓝猫1号", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeWakeText(string text)
+        {
+            var builder = new StringBuilder(text.Length);
+            foreach (var ch in text)
+            {
+                if (char.IsWhiteSpace(ch) || char.IsControl(ch) || char.IsPunctuation(ch))
+                {
+                    continue;
+                }
+
+                if (char.GetUnicodeCategory(ch) == UnicodeCategory.DecimalDigitNumber)
+                {
+                    var numeric = (int)char.GetNumericValue(ch);
+                    if (numeric >= 0)
+                    {
+                        builder.Append(numeric);
+                        continue;
+                    }
+                }
+
+                builder.Append(ch);
+            }
+
+            return builder.ToString();
         }
 
         // 设置压低声音时间？
