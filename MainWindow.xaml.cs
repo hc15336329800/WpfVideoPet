@@ -804,11 +804,13 @@ namespace WpfVideoPet
                 AppLogger.Info($"媒体缓存 HTTP 响应: {(int)response.StatusCode} {response.StatusCode}; Content-Length: {response.Content.Headers.ContentLength?.ToString() ?? "未知"}; 临时路径: {tempPath}");
 
                 await using var remoteStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
-                await using var fileStream = File.Create(tempPath);
-                await remoteStream.CopyToAsync(fileStream).ConfigureAwait(false);
-                await fileStream.FlushAsync().ConfigureAwait(false);
+                await using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.Read))
+                {
+                    await remoteStream.CopyToAsync(fileStream).ConfigureAwait(false);
+                    await fileStream.FlushAsync().ConfigureAwait(false);
+                }
 
-                var writtenLength = fileStream.Length;
+                var writtenLength = new FileInfo(tempPath).Length;
                 AppLogger.Info($"媒体缓存写入完成，实际写入 {writtenLength} 字节: {tempPath}");
 
                 if (media.FileSize.HasValue)
