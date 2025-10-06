@@ -3,7 +3,6 @@ using MQTTnet.Client;
 using MQTTnet.Packets;
 using MQTTnet.Protocol;
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Threading;
@@ -25,8 +24,7 @@ namespace WpfVideoPet
         };
 
         private readonly SemaphoreSlim _connectLock = new(1, 1);
-        private readonly HashSet<string> _processedJobIds = new(StringComparer.Ordinal);
-        private readonly MqttFactory _factory = new();
+         private readonly MqttFactory _factory = new();
 
         private IMqttClient? _client;
         private bool _disposed;
@@ -257,10 +255,8 @@ namespace WpfVideoPet
                 return false;
             }
 
-            if (!TryRegisterJobId(jobId))
-            {
-                return false;
-            }
+            // 为了保证每次下发都能触发播放，取消对相同 JobId 的去重逻辑。
+            RegisterJobId(jobId);
 
             var mediaInfo = new RemoteMediaInfo
             {
@@ -347,11 +343,8 @@ namespace WpfVideoPet
                 {
                     return false;
                 }
+                RegisterJobId(jobId);
 
-                if (!TryRegisterJobId(jobId))
-                {
-                    return false;
-                }
 
                 task = new RemoteMediaTask(jobId, scheduleTime, jobStatus, clientId, topic, timestamp, mediaInfo);
                 return true;
@@ -374,10 +367,8 @@ namespace WpfVideoPet
 
             var jobId = Guid.NewGuid().ToString("N");
 
-            if (!TryRegisterJobId(jobId))
-            {
-                return false;
-            }
+            RegisterJobId(jobId);
+
 
             var lastSegment = uri.Segments.Length > 0
                 ? uri.Segments[uri.Segments.Length - 1].Trim('/')
@@ -416,18 +407,16 @@ namespace WpfVideoPet
             return text.Trim();
         }
 
-        private bool TryRegisterJobId(string? jobId)
+        private void RegisterJobId(string? jobId)
         {
             if (string.IsNullOrWhiteSpace(jobId))
             {
-                return true;
+                return;
             }
-
-            lock (_processedJobIds)
-            {
-                return _processedJobIds.Add(jobId);
-            }
+            // 之前的实现会记录 JobId 并阻止重复任务触发播放，
+            // 这里保留方法用于后续可能的扩展，但不再做去重处理。
         }
+
 
         private RemoteMediaInfo? BuildMediaInfo(string jobId, JsonElement? mediaElement, JsonElement root, string? directMediaUrl)
         {
