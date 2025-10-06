@@ -906,18 +906,32 @@ namespace WpfVideoPet
             return value;
         }
 
+
         /// <summary>
-        /// 校验文件的 SHA-256 哈希是否与预期一致。
+        /// 校验文件的哈希是否与预期一致。
         /// </summary>
         private static async Task<bool> VerifyFileHashAsync(string filePath, string expectedHash)
         {
+            if (string.IsNullOrWhiteSpace(expectedHash))
+            {
+                return true;
+            }
+
+            var trimmed = expectedHash.Trim();
+            var algorithmHint = ExtractAlgorithmName(trimmed, out var remaining);
+            var hexCandidate = RemoveCommonSeparators(remaining);
+            var useBase64 = !IsHexString(hexCandidate);
+            var normalizedExpected = useBase64 ? NormalizeBase64(remaining) : hexCandidate;
+
+            using var algorithm = ResolveHashAlgorithm(algorithmHint, normalizedExpected.Length, useBase64) ?? SHA256.Create();
+
             try
             {
                 await using var stream = File.OpenRead(filePath);
-                using var sha256 = SHA256.Create();
-                var hash = await sha256.ComputeHashAsync(stream).ConfigureAwait(false);
-                var actual = Convert.ToHexString(hash);
-                return string.Equals(actual, expectedHash, StringComparison.OrdinalIgnoreCase);
+                var hash = await algorithm.ComputeHashAsync(stream).ConfigureAwait(false);
+                var actual = useBase64 ? Convert.ToBase64String(hash) : Convert.ToHexString(hash);
+                var comparison = useBase64 ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+                return string.Equals(actual, normalizedExpected, comparison);
             }
             catch (IOException)
             {
@@ -929,6 +943,141 @@ namespace WpfVideoPet
             }
         }
 
+        private static string ExtractAlgorithmName(string value, out string expected)
+        {
+            var separatorIndex = value.IndexOf(':');
+            if (separatorIndex > 0 && separatorIndex < value.Length - 1)
+            {
+                var name = value[..separatorIndex].Trim();
+                expected = value[(separatorIndex + 1)..].Trim();
+                return name;
+            }
+
+            expected = value;
+            return string.Empty;
+        }
+
+        private static string RemoveCommonSeparators(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return value;
+            }
+
+            var builder = new StringBuilder(value.Length);
+            foreach (var ch in value)
+            {
+                if (ch == '-' || ch == ' ' || ch == '_')
+                {
+                    continue;
+                }
+
+                builder.Append(ch);
+            }
+
+            return builder.ToString();
+        }
+
+        private static bool IsHexString(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return false;
+            }
+
+            if ((value.Length & 1) != 0)
+            {
+                return false;
+            }
+
+            foreach (var ch in value)
+            {
+                if (!Uri.IsHexDigit(ch))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static string NormalizeBase64(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            var trimmed = value.Trim();
+            var builder = new StringBuilder(trimmed.Length + 2);
+            foreach (var ch in trimmed)
+            {
+                if (char.IsWhiteSpace(ch))
+                {
+                    continue;
+                }
+
+                builder.Append(ch switch
+                {
+                    '-' => '+',
+                    '_' => '/',
+                    _ => ch,
+                });
+            }
+
+            var normalized = builder.ToString();
+            var padding = normalized.Length % 4;
+            if (padding > 0)
+            {
+                normalized = normalized.PadRight(normalized.Length + (4 - padding), '=');
+            }
+
+            return normalized;
+        }
+
+        private static HashAlgorithm? ResolveHashAlgorithm(string algorithmHint, int expectedLength, bool base64)
+        {
+            var algorithm = CreateHashAlgorithm(algorithmHint);
+            if (algorithm != null)
+            {
+                return algorithm;
+            }
+
+            return (base64, expectedLength) switch
+            {
+                (false, 32) => MD5.Create(),
+                (false, 40) => SHA1.Create(),
+                (false, 64) => SHA256.Create(),
+                (false, 96) => SHA384.Create(),
+                (false, 128) => SHA512.Create(),
+                (true, 24) => MD5.Create(),
+                (true, 28) => SHA1.Create(),
+                (true, 44) => SHA256.Create(),
+                (true, 64) => SHA384.Create(),
+                (true, 88) => SHA512.Create(),
+                _ => null,
+            };
+        }
+
+        private static HashAlgorithm? CreateHashAlgorithm(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return null;
+            }
+
+            var normalized = name.Trim().ToUpperInvariant().Replace("-", string.Empty);
+            return normalized switch
+            {
+                "MD5" => MD5.Create(),
+                "SHA1" => SHA1.Create(),
+                "SHA256" => SHA256.Create(),
+                "SHA384" => SHA384.Create(),
+                "SHA512" => SHA512.Create(),
+                _ => null,
+            };
+        }
+        
         /// <summary>
         /// 主窗口关闭时释放 MQTT 与网络资源。
         /// </summary>
