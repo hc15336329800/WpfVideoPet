@@ -36,8 +36,7 @@ namespace WpfVideoPet
         private MqttTaskService? _mqttService;
         private readonly HttpClient _httpClient = new();
         private readonly string _mediaCacheDirectory;
-        private readonly ConcurrentDictionary<string, Task> _mediaDownloadTasks = new(StringComparer.OrdinalIgnoreCase);
-        private readonly object _playbackStateLock = new();
+        private readonly ConcurrentDictionary<string, Task<string?>> _mediaDownloadTasks = new(StringComparer.OrdinalIgnoreCase); private readonly object _playbackStateLock = new();
         private string? _currentLocalMediaPath;
         private string? _currentRemoteMediaUrl;
 
@@ -52,6 +51,10 @@ namespace WpfVideoPet
                  "MediaCache");
             _mediaCacheDirectory = cacheRoot;
             Directory.CreateDirectory(_mediaCacheDirectory);
+
+            var logDirectory = Path.Combine(Path.GetDirectoryName(_mediaCacheDirectory) ?? _mediaCacheDirectory, "Logs");
+            AppLogger.Initialize(logDirectory);
+            AppLogger.Info($"应用启动，媒体缓存目录: {_mediaCacheDirectory}");
 
             Core.Initialize();
 
@@ -147,6 +150,7 @@ namespace WpfVideoPet
         {
             if (!File.Exists(path))
             {
+                AppLogger.Warn($"尝试播放的本地文件不存在: {path}");
                 return;
             }
 
@@ -157,6 +161,7 @@ namespace WpfVideoPet
                 _currentRemoteMediaUrl = null;
             }
 
+            AppLogger.Info($"开始播放本地文件: {path}");
             // 修改为循环播放（优先本地文件）
             using var media = new Media(_libVlc, new Uri(path));
             media.AddOption(":input-repeat=-1");
@@ -171,11 +176,13 @@ namespace WpfVideoPet
         {
             if (string.IsNullOrWhiteSpace(url))
             {
+                AppLogger.Warn("PlayRemoteMedia 收到空的 URL。");
                 return;
             }
 
             if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
             {
+                AppLogger.Warn($"无法解析的远程媒体地址: {url}");
                 return;
             }
 
@@ -186,6 +193,7 @@ namespace WpfVideoPet
                 _currentLocalMediaPath = null;
             }
 
+            AppLogger.Info($"开始在线播放远程媒体: {url}");
             // 修改为循环播放（优先本地文件）
             using var media = new Media(_libVlc, uri);
             media.AddOption(":input-repeat=-1");
@@ -505,12 +513,13 @@ namespace WpfVideoPet
         {
             if (!_appConfig.Mqtt.Enabled)
             {
+                AppLogger.Info("MQTT 功能未启用，跳过初始化。");
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(_appConfig.Mqtt.ServerUri))
             {
-                Debug.WriteLine("MQTT ServerUri 未配置，跳过初始化。");
+                AppLogger.Warn("MQTT ServerUri 未配置，跳过初始化。");
                 return;
             }
 
@@ -521,7 +530,12 @@ namespace WpfVideoPet
             {
                 if (task.Exception != null)
                 {
-                    Debug.WriteLine($"MQTT 连接失败: {task.Exception.GetBaseException().Message}");
+                    var message = task.Exception.GetBaseException().Message;
+                    AppLogger.Error(task.Exception, $"MQTT 连接失败: {message}");
+                }
+                else
+                {
+                    AppLogger.Info("MQTT 服务启动完成，等待远程媒体任务。");
                 }
             }, TaskScheduler.Default);
         }
@@ -531,6 +545,7 @@ namespace WpfVideoPet
         /// </summary>
         private void OnRemoteMediaTaskReceived(object? sender, RemoteMediaTask task)
         {
+            AppLogger.Info($"后台线程接收到远程媒体任务: {task.JobId ?? task.Media?.MediaId ?? "未知"}");
             _ = Task.Run(() => HandleRemoteMediaTaskAsync(task));
         }
 
@@ -541,7 +556,7 @@ namespace WpfVideoPet
         {
             try
             {
-                Debug.WriteLine($"收到远程媒体任务: {task.JobId}, 即将解析媒体信息。");
+                AppLogger.Info($"开始处理远程媒体任务，JobId: {task.JobId}, MediaId: {task.Media?.MediaId}");
                 var media = task.Media;
 
                 await Dispatcher.InvokeAsync(() => ShowIncomingMediaNotification(task));
@@ -549,23 +564,7 @@ namespace WpfVideoPet
                 var cached = await TryGetCachedMediaAsync(media).ConfigureAwait(false);
                 if (!string.IsNullOrEmpty(cached))
                 {
-                    await Dispatcher.InvokeAsync(() => PlayFile(cached));
-                    return;
-                }
-
-                // 远程拉流前先尝试完整下载，确保后续能以本地文件循环播放
-                try
-                {
-                    await CacheMediaAsync(task).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"缓存远程媒体时出现异常: {ex.Message}");
-                }
-
-                cached = await TryGetCachedMediaAsync(media).ConfigureAwait(false);
-                if (!string.IsNullOrEmpty(cached))
-                {
+                    AppLogger.Info($"找到可用的本地缓存，直接播放: {cached}");
                     await Dispatcher.InvokeAsync(() => PlayFile(cached));
                     return;
                 }
@@ -576,12 +575,44 @@ namespace WpfVideoPet
 
                 if (!string.IsNullOrWhiteSpace(playbackUrl))
                 {
+                    AppLogger.Info($"未命中缓存，先在线播放: {playbackUrl}");
                     await Dispatcher.InvokeAsync(() => PlayRemoteMedia(playbackUrl!));
                 }
+                else
+                {
+                    AppLogger.Warn("任务中缺失可用的在线播放地址。");
+                }
+
+                AppLogger.Info("开始后台缓存远程媒体文件。");
+                var cacheTask = CacheMediaAsync(task);
+                _ = cacheTask.ContinueWith(async t =>
+                {
+                    if (t.IsFaulted)
+                    {
+                        AppLogger.Error(t.Exception!.GetBaseException(), "后台缓存任务失败。");
+                        return;
+                    }
+
+                    var cachedPath = t.Result;
+                    if (string.IsNullOrEmpty(cachedPath))
+                    {
+                        AppLogger.Warn("后台缓存任务完成但未生成有效文件。");
+                        return;
+                    }
+
+                    AppLogger.Info($"缓存完成，切换为本地播放: {cachedPath}");
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        if (!string.IsNullOrEmpty(cachedPath) && File.Exists(cachedPath))
+                        {
+                            PlayFile(cachedPath);
+                        }
+                    });
+                }, TaskScheduler.Default);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"处理远程媒体任务失败: {ex}");
+                AppLogger.Error(ex, "处理远程媒体任务失败。");
             }
         }
 
@@ -599,6 +630,7 @@ namespace WpfVideoPet
 
             if (!string.IsNullOrEmpty(localPath) && File.Exists(localPath))
             {
+                AppLogger.Info($"播放结束，检测到本地缓存可用，重新播放: {localPath}");
                 // 如果本地缓存已就绪，则重新调用 PlayFile 形成稳定的循环
                 Dispatcher.InvokeAsync(() => PlayFile(localPath));
                 return;
@@ -606,6 +638,7 @@ namespace WpfVideoPet
 
             if (!string.IsNullOrEmpty(remoteUrl))
             {
+                AppLogger.Info($"播放结束，本地缓存不可用，重新拉流: {remoteUrl}");
                 // 若本地缓存暂不可用，则回退到重新拉流，保持播放不断档
                 Dispatcher.InvokeAsync(() => PlayRemoteMedia(remoteUrl));
             }
@@ -651,6 +684,7 @@ namespace WpfVideoPet
             var cachePath = BuildCachePath(media);
             if (!File.Exists(cachePath))
             {
+                AppLogger.Info($"缓存文件不存在: {cachePath}");
                 return null;
             }
 
@@ -659,6 +693,7 @@ namespace WpfVideoPet
                 var length = new FileInfo(cachePath).Length;
                 if (length != media.FileSize.Value)
                 {
+                    AppLogger.Warn($"缓存文件大小不匹配，删除重下。期望: {media.FileSize.Value}, 实际: {length}");
                     try
                     {
                         File.Delete(cachePath);
@@ -676,6 +711,7 @@ namespace WpfVideoPet
                 var valid = await VerifyFileHashAsync(cachePath, media.FileHash!).ConfigureAwait(false);
                 if (!valid)
                 {
+                    AppLogger.Warn("缓存文件哈希校验失败，将删除并重新下载。");
                     try
                     {
                         File.Delete(cachePath);
@@ -694,7 +730,7 @@ namespace WpfVideoPet
         /// <summary>
         /// 后台下载媒体文件并写入本地缓存。
         /// </summary>
-        private async Task CacheMediaAsync(RemoteMediaTask task)
+        private async Task<string?> CacheMediaAsync(RemoteMediaTask task)
         {
             var media = task.Media;
             var downloadUrl = !string.IsNullOrWhiteSpace(media.DownloadUrl)
@@ -703,7 +739,8 @@ namespace WpfVideoPet
 
             if (string.IsNullOrWhiteSpace(downloadUrl))
             {
-                return;
+                AppLogger.Warn("缓存流程中缺失下载地址。");
+                return null;
             }
 
             Directory.CreateDirectory(_mediaCacheDirectory);
@@ -711,7 +748,8 @@ namespace WpfVideoPet
             var existing = await TryGetCachedMediaAsync(media).ConfigureAwait(false);
             if (!string.IsNullOrEmpty(existing))
             {
-                return;
+                AppLogger.Info($"缓存检查时发现已有文件: {existing}");
+                return existing;
             }
 
             var targetPath = BuildCachePath(media);
@@ -719,8 +757,8 @@ namespace WpfVideoPet
 
             if (_mediaDownloadTasks.TryGetValue(cacheKey, out var existingTask))
             {
-                await existingTask.ConfigureAwait(false);
-                return;
+                AppLogger.Info($"已有正在运行的缓存任务，等待完成: {cacheKey}");
+                return await existingTask.ConfigureAwait(false);
             }
 
             var downloadTask = DownloadAndStoreAsync(downloadUrl!, targetPath, media);
@@ -731,18 +769,29 @@ namespace WpfVideoPet
 
             try
             {
-                await downloadTask.ConfigureAwait(false);
+                var successPath = await downloadTask.ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(successPath))
+                {
+                    AppLogger.Info($"媒体缓存写入完成: {successPath}");
+                    return successPath;
+                }
+                else
+                {
+                    AppLogger.Warn("媒体缓存写入任务结束但未返回文件路径。");
+                }
             }
             finally
             {
                 _mediaDownloadTasks.TryRemove(cacheKey, out _);
             }
+
+            return await TryGetCachedMediaAsync(media).ConfigureAwait(false);
         }
 
         /// <summary>
         /// 拉取远程媒体并在校验后保存到目标路径。
         /// </summary>
-        private async Task DownloadAndStoreAsync(string url, string targetPath, RemoteMediaInfo media)
+        private async Task<string?> DownloadAndStoreAsync(string url, string targetPath, RemoteMediaInfo media)
         {
             var tempPath = targetPath + ".downloading";
 
@@ -779,10 +828,11 @@ namespace WpfVideoPet
                 }
 
                 File.Move(tempPath, targetPath);
+                return targetPath;
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"缓存媒体文件失败: {ex.Message}");
+                AppLogger.Error(ex, $"缓存媒体文件失败: {ex.Message}");
                 try
                 {
                     if (File.Exists(tempPath))
@@ -794,7 +844,10 @@ namespace WpfVideoPet
                 {
                 }
             }
+
+            return null;
         }
+
 
         /// <summary>
         /// 根据媒体标识生成稳定的缓存路径。
@@ -890,14 +943,16 @@ namespace WpfVideoPet
                 try
                 {
                     await _mqttService.DisposeAsync().ConfigureAwait(false);
+                    AppLogger.Info("MQTT 服务已正常释放。");
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"释放 MQTT 服务时发生异常: {ex.Message}");
+                    AppLogger.Error(ex, $"释放 MQTT 服务时发生异常: {ex.Message}");
                 }
             }
 
             _httpClient.Dispose();
+            AppLogger.Info("主窗口关闭，HTTP 客户端资源已释放。");
         }
 
         private void ShowVideoCallWindow()
