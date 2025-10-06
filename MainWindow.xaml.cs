@@ -797,12 +797,19 @@ namespace WpfVideoPet
 
             try
             {
+                AppLogger.Info($"开始下载媒体缓存: {url} -> {tempPath}");
                 using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
                 response.EnsureSuccessStatusCode();
+
+                AppLogger.Info($"媒体缓存 HTTP 响应: {(int)response.StatusCode} {response.StatusCode}; Content-Length: {response.Content.Headers.ContentLength?.ToString() ?? "未知"}; 临时路径: {tempPath}");
 
                 await using var remoteStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
                 await using var fileStream = File.Create(tempPath);
                 await remoteStream.CopyToAsync(fileStream).ConfigureAwait(false);
+                await fileStream.FlushAsync().ConfigureAwait(false);
+
+                var writtenLength = fileStream.Length;
+                AppLogger.Info($"媒体缓存写入完成，实际写入 {writtenLength} 字节: {tempPath}");
 
                 if (media.FileSize.HasValue)
                 {
@@ -828,6 +835,7 @@ namespace WpfVideoPet
                 }
 
                 File.Move(tempPath, targetPath);
+                AppLogger.Info($"媒体缓存文件已落盘: {targetPath}");
                 return targetPath;
             }
             catch (Exception ex)
@@ -847,7 +855,6 @@ namespace WpfVideoPet
 
             return null;
         }
-
 
         /// <summary>
         /// 根据媒体标识生成稳定的缓存路径。
@@ -931,18 +938,23 @@ namespace WpfVideoPet
                 var hash = await algorithm.ComputeHashAsync(stream).ConfigureAwait(false);
                 var actual = useBase64 ? Convert.ToBase64String(hash) : Convert.ToHexString(hash);
                 var comparison = useBase64 ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-                return string.Equals(actual, normalizedExpected, comparison);
+                var match = string.Equals(actual, normalizedExpected, comparison);
+
+                AppLogger.Info($"哈希校验: 文件={filePath}, 算法={(string.IsNullOrWhiteSpace(algorithmHint) ? algorithm.GetType().Name : algorithmHint)}, 格式={(useBase64 ? "Base64" : "Hex")}, 期望={normalizedExpected}, 实际={actual}, 结果={(match ? "通过" : "失败")}");
+
+                return match;
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                AppLogger.Error(ex, $"读取文件进行哈希校验时发生 IO 异常: {filePath}");
                 return false;
             }
-            catch (UnauthorizedAccessException)
+            catch (UnauthorizedAccessException ex)
             {
+                AppLogger.Error(ex, $"访问文件进行哈希校验时被拒绝: {filePath}");
                 return false;
             }
         }
-
         private static string ExtractAlgorithmName(string value, out string expected)
         {
             var separatorIndex = value.IndexOf(':');
