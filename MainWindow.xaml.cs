@@ -321,20 +321,39 @@ namespace WpfVideoPet
             Dispatcher.BeginInvoke(new Action(ScheduleVolumeRestore));
         }
 
+
+        // 识别到声音 压低音乐  备用
+        //private void BeginAudioDucking()
+        //{
+        //    Dispatcher.BeginInvoke(new Action(() =>
+        //    {
+        //        _volumeRestoreTimer.Stop();
+
+        //        if (!_isDuckingAudio)
+        //        {
+        //            _isDuckingAudio = true;
+        //            var duckedVolume = Math.Max(5, _userPreferredVolume / 4);
+        //            SetPlayerVolume(duckedVolume, updateUserPreferred: false);
+        //        }
+
+        //        ScheduleVolumeRestore();
+        //    }));
+        //}
+
+
         private void BeginAudioDucking()
         {
             Dispatcher.BeginInvoke(new Action(() =>
             {
+                // 根据最新需求，识别到 “蓝猫一号” 时不再压低播放音量。
+                // 因此，这里仅确保相关定时器状态被复位，而不再修改播放器音量。
                 _volumeRestoreTimer.Stop();
 
-                if (!_isDuckingAudio)
+                if (_isDuckingAudio)
                 {
-                    _isDuckingAudio = true;
-                    var duckedVolume = Math.Max(5, _userPreferredVolume / 4);
-                    SetPlayerVolume(duckedVolume, updateUserPreferred: false);
+                    _isDuckingAudio = false;
+                    SetPlayerVolume(_userPreferredVolume);
                 }
-
-                ScheduleVolumeRestore();
             }));
         }
 
