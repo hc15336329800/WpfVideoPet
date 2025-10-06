@@ -186,53 +186,174 @@ namespace WpfVideoPet
         {
             task = null;
 
+            if (payload.Array is null || payload.Count == 0)
+            {
+                return false;
+            }
+
+            var text = Encoding.UTF8.GetString(payload.Array, payload.Offset, payload.Count).Trim();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            if (TryParseStandardRemoteMediaTask(text, out task))
+            {
+                return true;
+            }
+
+            if (TryParseFlexibleRemoteMediaTask(text, out task))
+            {
+                return true;
+            }
+
+            if (TryParseUrlPayload(text, out task))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryParseStandardRemoteMediaTask(string text, out RemoteMediaTask? task)
+        {
+            task = null;
+
+            TaskDownlinkMessage? message;
             try
             {
-                var message = JsonSerializer.Deserialize<TaskDownlinkMessage>(payload.AsSpan(), _serializerOptions);
-                if (message == null || string.IsNullOrWhiteSpace(message.JobId))
+                message = JsonSerializer.Deserialize<TaskDownlinkMessage>(text, _serializerOptions);
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+
+            if (message == null)
+            {
+                return false;
+            }
+
+            var jobId = string.IsNullOrWhiteSpace(message.JobId)
+                ? Guid.NewGuid().ToString("N")
+                : message.JobId!.Trim();
+
+            if (!IsRemoteMediaJobType(message.JobType))
+            {
+                return false;
+            }
+
+            if (message.Media == null)
+            {
+                return false;
+            }
+
+            var downloadUrl = TrimToNull(message.Media.DownloadUrl);
+            var accessibleUrl = TrimToNull(message.Media.AccessibleUrl);
+
+            if (string.IsNullOrWhiteSpace(downloadUrl) && string.IsNullOrWhiteSpace(accessibleUrl))
+            {
+                Debug.WriteLine("MQTT 远程媒体任务缺少可用的播放地址，已忽略。");
+                return false;
+            }
+
+            if (!TryRegisterJobId(jobId))
+            {
+                return false;
+            }
+
+            var mediaInfo = new RemoteMediaInfo
+            {
+                CoverUrl = TrimToNull(message.Media.CoverUrl),
+                DownloadUrl = downloadUrl,
+                AccessibleUrl = accessibleUrl,
+                FileHash = TrimToNull(message.Media.FileHash),
+                FileSize = message.Media.FileSize,
+                MediaId = TrimToNull(message.Media.MediaId),
+                JobId = jobId
+            };
+
+            task = new RemoteMediaTask(
+                jobId,
+                TrimToNull(message.ScheduleTime),
+                TrimToNull(message.JobStatus),
+                TrimToNull(message.ClientId),
+                TrimToNull(message.Topic),
+                message.Timestamp,
+                mediaInfo);
+
+            return true;
+        }
+
+        private bool TryParseFlexibleRemoteMediaTask(string text, out RemoteMediaTask? task)
+        {
+            task = null;
+
+            try
+            {
+                using var document = JsonDocument.Parse(text);
+                var root = document.RootElement;
+
+                if (root.ValueKind != JsonValueKind.Object)
                 {
                     return false;
                 }
 
-                lock (_processedJobIds)
+                var jobType = GetString(root, "jobType", "job_type", "type");
+                if (!IsRemoteMediaJobType(jobType))
                 {
-                    if (!_processedJobIds.Add(message.JobId))
+                    return false;
+                }
+
+                var jobId = TrimToNull(GetString(root, "jobId", "job_id", "taskId", "task_id", "id"))
+                    ?? Guid.NewGuid().ToString("N");
+
+                var scheduleTime = TrimToNull(GetString(root, "scheduleTime", "schedule_time"));
+                var jobStatus = TrimToNull(GetString(root, "jobStatus", "job_status", "status"));
+                var clientId = TrimToNull(GetString(root, "clientId", "client_id", "terminalId", "terminal_id"));
+                var topic = TrimToNull(GetString(root, "topic", "topicName", "topic_name"));
+                var timestamp = GetInt64(root, "timestamp", "ts", "time");
+
+                string? directMediaUrl = null;
+                RemoteMediaInfo? mediaInfo = null;
+
+                if (TryGetProperty(root, out var mediaElement, "media", "mediaInfo", "media_info", "data"))
+                {
+                    if (mediaElement.ValueKind == JsonValueKind.Object)
                     {
-                        return false;
+                        mediaInfo = BuildMediaInfo(jobId, mediaElement, root, directMediaUrl: null);
+                    }
+                    else if (mediaElement.ValueKind == JsonValueKind.String)
+                    {
+                        directMediaUrl = TrimToNull(mediaElement.GetString());
+                    }
+                    else if (mediaElement.ValueKind == JsonValueKind.Array && mediaElement.GetArrayLength() > 0)
+                    {
+                        var first = mediaElement[0];
+                        if (first.ValueKind == JsonValueKind.Object)
+                        {
+                            mediaInfo = BuildMediaInfo(jobId, first, root, directMediaUrl: null);
+                        }
+                        else if (first.ValueKind == JsonValueKind.String)
+                        {
+                            directMediaUrl = TrimToNull(first.GetString());
+                        }
                     }
                 }
 
-                if (!string.Equals(message.JobType, "REMOTE_MEDIA", StringComparison.OrdinalIgnoreCase) || message.Media == null)
+                mediaInfo ??= BuildMediaInfo(jobId, null, root, directMediaUrl);
+
+                if (mediaInfo == null)
                 {
                     return false;
                 }
 
-                if (string.IsNullOrWhiteSpace(message.Media.DownloadUrl) && string.IsNullOrWhiteSpace(message.Media.AccessibleUrl))
+                if (!TryRegisterJobId(jobId))
                 {
-                    Debug.WriteLine("MQTT 远程媒体任务缺少可用的播放地址，已忽略。");
                     return false;
                 }
 
-                var mediaInfo = new RemoteMediaInfo
-                {
-                    CoverUrl = message.Media.CoverUrl,
-                    DownloadUrl = message.Media.DownloadUrl,
-                    AccessibleUrl = message.Media.AccessibleUrl,
-                    FileHash = message.Media.FileHash,
-                    FileSize = message.Media.FileSize,
-                    MediaId = message.Media.MediaId,
-                    JobId = message.JobId
-                };
-
-                task = new RemoteMediaTask(
-                    message.JobId!,
-                    message.ScheduleTime,
-                    message.JobStatus,
-                    message.ClientId,
-                    message.Topic,
-                    message.Timestamp,
-                    mediaInfo);
-
+                task = new RemoteMediaTask(jobId, scheduleTime, jobStatus, clientId, topic, timestamp, mediaInfo);
                 return true;
             }
             catch (JsonException ex)
@@ -241,6 +362,222 @@ namespace WpfVideoPet
                 return false;
             }
         }
+
+        private bool TryParseUrlPayload(string text, out RemoteMediaTask? task)
+        {
+            task = null;
+
+            if (!Uri.TryCreate(text, UriKind.Absolute, out var uri))
+            {
+                return false;
+            }
+
+            var jobId = Guid.NewGuid().ToString("N");
+
+            if (!TryRegisterJobId(jobId))
+            {
+                return false;
+            }
+
+            var lastSegment = uri.Segments.Length > 0
+                ? uri.Segments[uri.Segments.Length - 1].Trim('/')
+                : uri.Host;
+
+            var mediaInfo = new RemoteMediaInfo
+            {
+                AccessibleUrl = uri.ToString(),
+                DownloadUrl = uri.ToString(),
+                MediaId = string.IsNullOrWhiteSpace(lastSegment) ? null : lastSegment,
+                JobId = jobId
+            };
+
+            task = new RemoteMediaTask(jobId, null, null, null, null, null, mediaInfo);
+            return true;
+        }
+
+        private static bool IsRemoteMediaJobType(string? jobType)
+        {
+            if (string.IsNullOrWhiteSpace(jobType))
+            {
+                return true;
+            }
+
+            var normalized = NormalizePropertyName(jobType);
+            return normalized is "remotemedia" or "remotevideo" or "video" or "mediaplay" or "playmedia" or "videoplay" or "media";
+        }
+
+        private static string? TrimToNull(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return null;
+            }
+
+            return text.Trim();
+        }
+
+        private bool TryRegisterJobId(string? jobId)
+        {
+            if (string.IsNullOrWhiteSpace(jobId))
+            {
+                return true;
+            }
+
+            lock (_processedJobIds)
+            {
+                return _processedJobIds.Add(jobId);
+            }
+        }
+
+        private RemoteMediaInfo? BuildMediaInfo(string jobId, JsonElement? mediaElement, JsonElement root, string? directMediaUrl)
+        {
+            string? accessibleUrl = null;
+            string? downloadUrl = null;
+            string? coverUrl = null;
+            string? fileHash = null;
+            long? fileSize = null;
+            string? mediaId = null;
+
+            if (mediaElement.HasValue)
+            {
+                var media = mediaElement.Value;
+
+                if (media.ValueKind == JsonValueKind.Object)
+                {
+                    accessibleUrl = TrimToNull(GetString(media, "accessibleUrl", "accessible_url", "url", "mediaUrl", "media_url", "playUrl", "play_url"));
+                    downloadUrl = TrimToNull(GetString(media, "downloadUrl", "download_url", "url"));
+                    coverUrl = TrimToNull(GetString(media, "coverUrl", "cover_url", "poster", "thumbnail"));
+                    fileHash = TrimToNull(GetString(media, "fileHash", "file_hash", "md5", "checksum"));
+                    fileSize = GetInt64(media, "fileSize", "file_size", "size");
+                    mediaId = TrimToNull(GetString(media, "mediaId", "media_id", "id", "name"));
+                }
+                else if (media.ValueKind == JsonValueKind.String)
+                {
+                    var url = TrimToNull(media.GetString());
+                    if (!string.IsNullOrWhiteSpace(url))
+                    {
+                        accessibleUrl ??= url;
+                        downloadUrl ??= url;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(directMediaUrl))
+            {
+                accessibleUrl ??= directMediaUrl;
+                downloadUrl ??= directMediaUrl;
+            }
+
+            accessibleUrl ??= TrimToNull(GetString(root, "accessibleUrl", "accessible_url", "url", "mediaUrl", "media_url", "playUrl", "play_url"));
+            downloadUrl ??= TrimToNull(GetString(root, "downloadUrl", "download_url", "url"));
+            coverUrl ??= TrimToNull(GetString(root, "coverUrl", "cover_url", "poster", "thumbnail"));
+            fileHash ??= TrimToNull(GetString(root, "fileHash", "file_hash", "md5", "checksum"));
+            fileSize ??= GetInt64(root, "fileSize", "file_size", "size");
+            mediaId ??= TrimToNull(GetString(root, "mediaId", "media_id", "id", "name"));
+
+            if (string.IsNullOrWhiteSpace(accessibleUrl) && string.IsNullOrWhiteSpace(downloadUrl))
+            {
+                return null;
+            }
+
+            return new RemoteMediaInfo
+            {
+                AccessibleUrl = accessibleUrl,
+                DownloadUrl = downloadUrl,
+                CoverUrl = coverUrl,
+                FileHash = fileHash,
+                FileSize = fileSize,
+                MediaId = mediaId,
+                JobId = jobId
+            };
+        }
+
+        private static bool TryGetProperty(JsonElement element, out JsonElement value, params string[] names)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                foreach (var candidate in names)
+                {
+                    if (IsPropertyMatch(property.Name, candidate))
+                    {
+                        value = property.Value;
+                        return true;
+                    }
+                }
+            }
+
+            value = default;
+            return false;
+        }
+
+        private static string? GetString(JsonElement element, params string[] names)
+        {
+            if (!TryGetProperty(element, out var value, names))
+            {
+                return null;
+            }
+
+            return value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.GetRawText(),
+                JsonValueKind.True => bool.TrueString,
+                JsonValueKind.False => bool.FalseString,
+                _ => null
+            };
+        }
+
+        private static long? GetInt64(JsonElement element, params string[] names)
+        {
+            if (!TryGetProperty(element, out var value, names))
+            {
+                return null;
+            }
+
+            if (value.ValueKind == JsonValueKind.Number)
+            {
+                if (value.TryGetInt64(out var number))
+                {
+                    return number;
+                }
+
+                if (value.TryGetDouble(out var dbl))
+                {
+                    return (long)dbl;
+                }
+            }
+            else if (value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+
+            return null;
+        }
+
+        private static bool IsPropertyMatch(string actualName, string candidate)
+        {
+            return NormalizePropertyName(actualName) == NormalizePropertyName(candidate);
+        }
+
+        private static string NormalizePropertyName(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return string.Empty;
+            }
+
+            var builder = new StringBuilder(name.Length);
+            foreach (var ch in name)
+            {
+                if (char.IsLetterOrDigit(ch))
+                {
+                    builder.Append(char.ToLowerInvariant(ch));
+                }
+            }
+
+            return builder.ToString();
+        }
+
 
         /// <summary>
         /// 通过 UI 线程弹窗展示 MQTT 收到的原始消息，便于快速验证通信链路。
@@ -267,7 +604,9 @@ namespace WpfVideoPet
 
             void ShowDialog()
             {
-                MessageBox.Show(text, "MQTT 测试消息", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                // 收到订阅消息时弹窗显示内容，便于测试。
+                //MessageBox.Show(text, "MQTT 测试消息", MessageBoxButton.OK, MessageBoxImage.Information);
             }
 
             if (dispatcher.CheckAccess())
