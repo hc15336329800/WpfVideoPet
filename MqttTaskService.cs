@@ -166,23 +166,51 @@ namespace WpfVideoPet
                 // 先弹出原始消息内容，便于测试订阅主题是否收到数据。
                 ShowIncomingMessagePopup(segment.Value);
 
-                var message = JsonSerializer.Deserialize<TaskDownlinkMessage>(segment.Value.AsSpan(), _serializerOptions);
-                if (message == null || string.IsNullOrWhiteSpace(message.JobId))
+                if (!TryParseRemoteMediaTask(segment.Value, out var task))
                 {
                     return Task.CompletedTask;
+                }
+
+                var remoteTask = task!;
+                RemoteMediaTaskReceived?.Invoke(this, remoteTask);
+            }
+            catch (Exception ex) when (ex is not JsonException)
+            {
+                Debug.WriteLine($"处理 MQTT 消息时异常: {ex.Message}");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private bool TryParseRemoteMediaTask(ArraySegment<byte> payload, out RemoteMediaTask? task)
+        {
+            task = null;
+
+            try
+            {
+                var message = JsonSerializer.Deserialize<TaskDownlinkMessage>(payload.AsSpan(), _serializerOptions);
+                if (message == null || string.IsNullOrWhiteSpace(message.JobId))
+                {
+                    return false;
                 }
 
                 lock (_processedJobIds)
                 {
                     if (!_processedJobIds.Add(message.JobId))
                     {
-                        return Task.CompletedTask;
+                        return false;
                     }
                 }
 
                 if (!string.Equals(message.JobType, "REMOTE_MEDIA", StringComparison.OrdinalIgnoreCase) || message.Media == null)
                 {
-                    return Task.CompletedTask;
+                    return false;
+                }
+
+                if (string.IsNullOrWhiteSpace(message.Media.DownloadUrl) && string.IsNullOrWhiteSpace(message.Media.AccessibleUrl))
+                {
+                    Debug.WriteLine("MQTT 远程媒体任务缺少可用的播放地址，已忽略。");
+                    return false;
                 }
 
                 var mediaInfo = new RemoteMediaInfo
@@ -196,7 +224,7 @@ namespace WpfVideoPet
                     JobId = message.JobId
                 };
 
-                var task = new RemoteMediaTask(
+                task = new RemoteMediaTask(
                     message.JobId!,
                     message.ScheduleTime,
                     message.JobStatus,
@@ -205,18 +233,13 @@ namespace WpfVideoPet
                     message.Timestamp,
                     mediaInfo);
 
-                RemoteMediaTaskReceived?.Invoke(this, task);
+                return true;
             }
             catch (JsonException ex)
             {
                 Debug.WriteLine($"MQTT 消息解析失败: {ex.Message}");
+                return false;
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"处理 MQTT 消息时异常: {ex.Message}");
-            }
-
-            return Task.CompletedTask;
         }
 
         /// <summary>

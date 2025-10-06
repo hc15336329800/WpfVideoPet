@@ -511,6 +511,7 @@ namespace WpfVideoPet
         {
             try
             {
+                Debug.WriteLine($"收到远程媒体任务: {task.JobId}, 即将解析媒体信息。");
                 var media = task.Media;
 
                 var cached = await TryGetCachedMediaAsync(media).ConfigureAwait(false);
