@@ -13,6 +13,7 @@ namespace WpfVideoPet
         public string PageUrl { get; set; } = "https://localhost";
 
         public MqttConfig Mqtt { get; } = new();
+        public AudioDuckingConfig AudioDucking { get; } = new();
 
         public bool IsOperator => string.Equals(Role, "operator", StringComparison.OrdinalIgnoreCase);
 
@@ -126,6 +127,24 @@ namespace WpfVideoPet
                         if (mqttElement.TryGetProperty("connectionTimeout", out var connectionTimeoutElement) && connectionTimeoutElement.TryGetInt32(out var timeoutValue))
                         {
                             mqtt.ConnectionTimeout = Math.Max(0, timeoutValue);
+                        }
+                    }
+
+                    if (root.TryGetProperty("audio", out var audioElement) && audioElement.ValueKind == JsonValueKind.Object)
+                    {
+                        if (audioElement.TryGetProperty("ducking", out var duckingElement) && duckingElement.ValueKind == JsonValueKind.Object)
+                        {
+                            var ducking = config.AudioDucking;
+
+                            if (duckingElement.TryGetProperty("enabled", out var duckEnabledElement) && duckEnabledElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                            {
+                                ducking.Enabled = duckEnabledElement.GetBoolean();
+                            }
+
+                            if (duckingElement.TryGetProperty("restoreDelaySeconds", out var restoreDelayElement) && restoreDelayElement.TryGetInt32(out var restoreDelaySeconds))
+                            {
+                                ducking.RestoreDelaySeconds = Math.Max(0, restoreDelaySeconds);
+                            }
                         }
                     }
                 }
@@ -250,4 +269,19 @@ public sealed class MqttConfig
     /// 设备上报执行结果的 Topic（tr_{clientId}）。
     /// </summary>
     public string UplinkTopic => string.IsNullOrWhiteSpace(ClientId) ? string.Empty : $"tr_{ClientId}";
+}
+
+public sealed class AudioDuckingConfig
+{
+    /// <summary>
+    /// 是否在识别到人声时压低播放器音量。
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// 在恢复正常音量前的等待秒数，允许 0 表示立即恢复。
+    /// </summary>
+    public int RestoreDelaySeconds { get; set; } = 5;
+
+    public TimeSpan RestoreDelay => TimeSpan.FromSeconds(Math.Max(0, RestoreDelaySeconds));
 }

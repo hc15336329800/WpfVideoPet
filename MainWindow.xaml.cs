@@ -27,13 +27,12 @@ namespace WpfVideoPet
         private VideoCallWindow? _videoCallWindow;
         private SpeechRecognitionEngine? _speechRecognizer;
         private const double WakeWordConfidenceThreshold = 0.45;
-        //  5 秒倒计时 压低声音
-        private static readonly TimeSpan VolumeRestoreDelay = TimeSpan.FromSeconds(5);
         private readonly DispatcherTimer _volumeRestoreTimer;
         private bool _suppressSliderCallback;
         private bool _isDuckingAudio;
         private int _userPreferredVolume;
         private readonly AppConfig _appConfig;
+        private readonly AudioDuckingConfig _audioDuckingConfig;
         private MqttTaskService? _mqttService;
         private readonly HttpClient _httpClient = new();
         private readonly string _mediaCacheDirectory;
@@ -43,6 +42,7 @@ namespace WpfVideoPet
         {
             InitializeComponent();
             _appConfig = AppConfig.Load(null);
+            _audioDuckingConfig = _appConfig.AudioDucking;
             _mediaCacheDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "MediaCache");
             Directory.CreateDirectory(_mediaCacheDirectory);
 
@@ -80,7 +80,7 @@ namespace WpfVideoPet
 
             _volumeRestoreTimer = new DispatcherTimer
             {
-                Interval = VolumeRestoreDelay
+                Interval = _audioDuckingConfig.RestoreDelay
             };
             _volumeRestoreTimer.Tick += (_, __) => RestorePlayerVolume();
 
@@ -309,8 +309,7 @@ namespace WpfVideoPet
 
         private void SpeechRecognizerOnSpeechDetected(object? sender, SpeechDetectedEventArgs e)
         {
-            // 最新需求：识别到“蓝猫一号”时不再压低播放音量。
-            // 这里仍沿用原有的语音检测节奏，但 BeginAudioDucking 仅用于维持状态机而不再改变音量。
+            // 是否压低播放音量由配置控制。
             BeginAudioDucking();
         }
 
@@ -348,11 +347,18 @@ namespace WpfVideoPet
         {
             Dispatcher.BeginInvoke(new Action(() =>
             {
+                if (!_audioDuckingConfig.Enabled)
+                {
+                    return;
+                }
+
                 _volumeRestoreTimer.Stop();
 
                 if (!_isDuckingAudio)
                 {
                     _isDuckingAudio = true;
+                    var duckedVolume = Math.Max(5, _userPreferredVolume / 4);
+                    SetPlayerVolume(duckedVolume, updateUserPreferred: false);
                 }
 
                 ScheduleVolumeRestore();
@@ -401,16 +407,27 @@ namespace WpfVideoPet
             return builder.ToString();
         }
 
-        // 设置压低声音时间？
         private void ScheduleVolumeRestore()
         {
+            if (!_audioDuckingConfig.Enabled)
+            {
+                return;
+            }
+
             if (!_isDuckingAudio)
             {
                 return;
             }
 
             _volumeRestoreTimer.Stop();
-            _volumeRestoreTimer.Interval = VolumeRestoreDelay;
+
+            if (_audioDuckingConfig.RestoreDelaySeconds <= 0)
+            {
+                RestorePlayerVolume();
+                return;
+            }
+
+            _volumeRestoreTimer.Interval = _audioDuckingConfig.RestoreDelay;
             _volumeRestoreTimer.Start();
         }
 

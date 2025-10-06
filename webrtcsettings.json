@@ -27,5 +27,13 @@
         "cleanSession": false,
         "keepAliveInterval": 60,
         "connectionTimeout": 10
+    },
+
+    "audio": {
+        "_comment": "语音识别时的音量压低设置。",
+        "ducking": {
+            "enabled": false,
+            "restoreDelaySeconds": 5
+        }
     }
 }
