@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 
 namespace WpfVideoPet
@@ -27,8 +28,10 @@ namespace WpfVideoPet
             {
                 try
                 {
-                    using var stream = File.OpenRead(configPath);
-                    using var doc = JsonDocument.Parse(stream);
+                    var rawText = File.ReadAllText(configPath);
+                    var sanitized = RemoveJsonComments(rawText);
+                    using var doc = JsonDocument.Parse(sanitized);
+
                     var root = doc.RootElement;
 
                     if (root.TryGetProperty("role", out var roleElement))
@@ -225,9 +228,92 @@ namespace WpfVideoPet
                     return false;
                 }
             }
-
             error = null;
             return true;
+        }
+
+        private static string RemoveJsonComments(string json)
+        {
+            if (string.IsNullOrEmpty(json))
+            {
+                return json;
+            }
+
+            var builder = new StringBuilder(json.Length);
+            var inString = false;
+            var inSingleLineComment = false;
+            var inMultiLineComment = false;
+
+            for (var i = 0; i < json.Length; i++)
+            {
+                var ch = json[i];
+                var next = i + 1 < json.Length ? json[i + 1] : '\0';
+
+                if (inSingleLineComment)
+                {
+                    if (ch == '\r' || ch == '\n')
+                    {
+                        inSingleLineComment = false;
+                        builder.Append(ch);
+
+                        if (ch == '\r' && next == '\n')
+                        {
+                            builder.Append(next);
+                            i++;
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (inMultiLineComment)
+                {
+                    if (ch == '*' && next == '/')
+                    {
+                        inMultiLineComment = false;
+                        i++;
+                    }
+
+                    continue;
+                }
+
+                if (ch == '"' && !IsEscaped(json, i))
+                {
+                    inString = !inString;
+                    builder.Append(ch);
+                    continue;
+                }
+
+                if (!inString && ch == '/' && next == '/')
+                {
+                    inSingleLineComment = true;
+                    i++;
+                    continue;
+                }
+
+                if (!inString && ch == '/' && next == '*')
+                {
+                    inMultiLineComment = true;
+                    i++;
+                    continue;
+                }
+
+                builder.Append(ch);
+            }
+
+            return builder.ToString();
+        }
+
+        private static bool IsEscaped(string text, int index)
+        {
+            var backslashCount = 0;
+
+            for (var i = index - 1; i >= 0 && text[i] == '\\'; i--)
+            {
+                backslashCount++;
+            }
+
+            return (backslashCount & 1) == 1;
         }
     }
 }
