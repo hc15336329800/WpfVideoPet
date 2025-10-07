@@ -10,6 +10,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Speech.Recognition;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -37,9 +38,13 @@ namespace WpfVideoPet
         private MqttTaskService? _mqttService;
         private readonly HttpClient _httpClient = new();
         private readonly string _mediaCacheDirectory;
-        private readonly ConcurrentDictionary<string, Task<string?>> _mediaDownloadTasks = new(StringComparer.OrdinalIgnoreCase); private readonly object _playbackStateLock = new();
+        private readonly ConcurrentDictionary<string, Task<string?>> _mediaDownloadTasks = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _playbackStateLock = new();
         private string? _currentLocalMediaPath;
         private string? _currentRemoteMediaUrl;
+        private ModbusRtuRelayClient? _modbusClient;
+        private CancellationTokenSource? _modbusCts;
+        private Task? _modbusMonitorTask;
 
         public MainWindow()
         {
@@ -104,6 +109,7 @@ namespace WpfVideoPet
 
             InitializeSpeechRecognition();
             InitializeMqttService();
+            InitializeModbusMonitoring();
         }
 
         private void OnMainWindowLoaded(object sender, RoutedEventArgs e)
@@ -1204,6 +1210,40 @@ namespace WpfVideoPet
 
             _httpClient.Dispose();
             AppLogger.Info("主窗口关闭，HTTP 客户端资源已释放。");
+
+            if (_modbusCts != null)
+            {
+                _modbusCts.Cancel();
+            }
+
+            if (_modbusMonitorTask != null)
+            {
+                try
+                {
+                    await _modbusMonitorTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // 任务被取消属于正常流程，无需额外处理。
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, $"等待 Modbus 监听任务结束时发生异常: {ex.Message}");
+                }
+            }
+
+            if (_modbusClient != null)
+            {
+                try
+                {
+                    await _modbusClient.DisposeAsync().ConfigureAwait(false);
+                    AppLogger.Info("Modbus 客户端资源已释放。");
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, $"释放 Modbus 客户端时发生异常: {ex.Message}");
+                }
+            }
         }
 
         private void ShowVideoCallWindow()
@@ -1231,6 +1271,98 @@ namespace WpfVideoPet
             };
             _videoCallWindow.Closed += (_, _) => _videoCallWindow = null;
             _videoCallWindow.Show();
+        }
+
+        /// <summary>
+        /// 初始化 Modbus RTU 继电器监听，在程序启动后持续读取 1 号继电器状态。
+        /// </summary>
+        private void InitializeModbusMonitoring()
+        {
+            var modbusConfig = _appConfig.Modbus;
+            if (!modbusConfig.Enabled)
+            {
+                AppLogger.Info("Modbus 功能未启用，跳过继电器监听初始化。");
+                return;
+            }
+
+            try
+            {
+                _modbusClient = new ModbusRtuRelayClient(modbusConfig);
+                _modbusCts = new CancellationTokenSource();
+                var token = _modbusCts.Token;
+
+                // 在后台线程中一直监听 1 号继电器状态，直到程序退出。
+                _modbusMonitorTask = Task.Run(() => MonitorRelayLoopAsync(_modbusClient, token), token);
+                AppLogger.Info("Modbus 继电器监听已启动。");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, $"初始化 Modbus 客户端失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 持续读取继电器状态，一旦检测到 1 号继电器闭合则调度弹出视频窗口。
+        /// </summary>
+        private async Task MonitorRelayLoopAsync(ModbusRtuRelayClient client, CancellationToken token)
+        {
+            bool? lastRelayState = null;
+
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    // 读取线圈地址 0（即 1 号继电器）的当前状态。
+                    var coils = await client.ReadCoilsAsync(0, 1, token).ConfigureAwait(false);
+                    var isRelayClosed = coils.Length > 0 && coils[0];
+
+                    if (lastRelayState != isRelayClosed)
+                    {
+                        lastRelayState = isRelayClosed;
+                        AppLogger.Info($"检测到继电器 1 状态变化: {(isRelayClosed ? "闭合" : "断开")}。");
+
+                        if (isRelayClosed)
+                        {
+                            // 继电器闭合时调度到 UI 线程，确保安全弹窗。
+                            _ = Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                AppLogger.Info("继电器 1 闭合，准备弹出视频窗口。");
+                                ShowVideoCallWindow();
+                            }));
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, $"读取继电器状态失败: {ex.Message}");
+
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+
+                    continue;
+                }
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(500), token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+
+            AppLogger.Info("Modbus 继电器监听循环已结束。");
         }
     }
 }
