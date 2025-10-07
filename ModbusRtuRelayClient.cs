@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO.Ports;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Globalization;
+using System.Text;
 
 namespace WpfVideoPet
 {
@@ -30,6 +32,10 @@ namespace WpfVideoPet
                 WriteTimeout = config.WriteTimeout <= 0 ? SerialPort.InfiniteTimeout : config.WriteTimeout,
                 Handshake = Handshake.None
             };
+
+            // 在实例化阶段输出关键 Modbus 参数，便于定位端口配置问题。
+            AppLogger.Info(
+                $"已创建 Modbus 客户端: 从站地址={_slaveAddress}, 串口={_serialPort.PortName}, 波特率={_serialPort.BaudRate}, 数据位={_serialPort.DataBits}, 校验={_serialPort.Parity}, 停止位={_serialPort.StopBits}, 读超时={_serialPort.ReadTimeout}, 写超时={_serialPort.WriteTimeout}。");
         }
 
         public async Task<bool[]> ReadAllChannelsAsync(CancellationToken cancellationToken = default)
@@ -84,6 +90,8 @@ namespace WpfVideoPet
             {
                 throw new ArgumentOutOfRangeException(nameof(count), count, "读取数量需在 1-2000 之间。");
             }
+            // 记录即将执行的读取参数，以便在日志中快速定位具体的读取指令。
+            AppLogger.Info($"准备读取线圈: 起始地址={startAddress}, 数量={count}。");
 
             var request = BuildReadCoilsFrame(startAddress, count);
             var response = await SendAndValidateAsync(request, 0x01, cancellationToken).ConfigureAwait(false);
@@ -197,6 +205,9 @@ namespace WpfVideoPet
                 cancellationToken.ThrowIfCancellationRequested();
                 _serialPort.DiscardInBuffer();
                 _serialPort.DiscardOutBuffer();
+
+                // 记录原始帧内容，便于与硬件厂家核对收发数据是否正确。
+                AppLogger.Info($"发送 Modbus 请求: 功能码=0x{functionCode:X2}, 帧={FormatFrame(request)}");
                 _serialPort.Write(request, 0, request.Length);
 
                 if (functionCode is 0x05 or 0x06 or 0x0F or 0x10)
@@ -224,6 +235,7 @@ namespace WpfVideoPet
             var buffer = new byte[length];
             ReadExact(buffer);
             ValidateResponse(buffer, functionCode);
+            AppLogger.Info($"收到 Modbus 固定长度响应: 功能码=0x{functionCode:X2}, 帧={FormatFrame(buffer)}");
             return buffer;
         }
 
@@ -256,6 +268,7 @@ namespace WpfVideoPet
             ReadExact(payload);
             var response = Combine(header, payload);
             ValidateCrc(response);
+            AppLogger.Info($"收到 Modbus 可变长度响应: 功能码=0x{functionCode:X2}, 帧={FormatFrame(response)}");
             return response;
         }
 
@@ -316,11 +329,37 @@ namespace WpfVideoPet
                 var read = _serialPort.Read(buffer, offset, buffer.Length - offset);
                 if (read <= 0)
                 {
+                    AppLogger.Warn($"串口读取超时: 期望剩余字节={buffer.Length - offset}。");
                     throw new TimeoutException("读取 Modbus 响应超时。");
                 }
 
                 offset += read;
             }
+        }
+
+        /// <summary>
+        /// 将帧数据转换为十六进制字符串，便于在日志中直观查看原始报文。
+        /// </summary>
+        private static string FormatFrame(ReadOnlySpan<byte> frame)
+        {
+            if (frame.IsEmpty)
+            {
+                return "(空)";
+            }
+
+            var builder = new StringBuilder(frame.Length * 5);
+            for (var i = 0; i < frame.Length; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(' ');
+                }
+
+                builder.Append("0x");
+                builder.Append(frame[i].ToString("X2", CultureInfo.InvariantCulture));
+            }
+
+            return builder.ToString();
         }
         /// <summary>
         /// 确保串口已开启，若为首次连接则输出详细日志，便于排查连接问题。
