@@ -46,9 +46,16 @@ namespace WpfVideoPet
             InitializeComponent();
             _appConfig = AppConfig.Load(null);
             _audioDuckingConfig = _appConfig.AudioDucking;
-            _mediaCacheDirectory = EnsureMediaCacheDirectory(out var cacheInitWarning);
 
-            var logDirectory = Path.Combine(Path.GetDirectoryName(_mediaCacheDirectory) ?? _mediaCacheDirectory, "Logs");
+            var startupDirectory = AppContext.BaseDirectory;
+            if (string.IsNullOrWhiteSpace(startupDirectory))
+            {
+                startupDirectory = Directory.GetCurrentDirectory();
+            }
+
+            _mediaCacheDirectory = EnsureMediaCacheDirectory(startupDirectory, out var cacheInitWarning);
+
+            var logDirectory = Path.Combine(startupDirectory, "Logs");
             AppLogger.Initialize(logDirectory);
             AppLogger.Info($"应用启动，媒体缓存目录: {_mediaCacheDirectory}");
             if (!string.IsNullOrWhiteSpace(cacheInitWarning))
@@ -915,10 +922,26 @@ namespace WpfVideoPet
             return value;
         }
 
-        private static string EnsureMediaCacheDirectory(out string? warningMessage)
+        private static string EnsureMediaCacheDirectory(string startupDirectory, out string? warningMessage)
         {
             warningMessage = null;
             var failures = new List<string>();
+            var normalizedStartup = string.IsNullOrWhiteSpace(startupDirectory)
+                ? Directory.GetCurrentDirectory()
+                : startupDirectory;
+
+            var startupCachePath = Path.Combine(normalizedStartup, "MediaCache");
+
+            try
+            {
+                Directory.CreateDirectory(startupCachePath);
+                return startupCachePath;
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                failures.Add($"{startupCachePath} ({ex.Message})");
+            }
+
             var candidates = new List<string?>
             {
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
