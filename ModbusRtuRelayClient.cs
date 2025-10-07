@@ -322,12 +322,27 @@ namespace WpfVideoPet
                 offset += read;
             }
         }
-
+        /// <summary>
+        /// 确保串口已开启，若为首次连接则输出详细日志，便于排查连接问题。
+        /// </summary>
         private void EnsureOpen()
         {
-            if (!_serialPort.IsOpen)
+            if (_serialPort.IsOpen)
+            {
+                return;
+            }
+
+            AppLogger.Info($"准备打开 Modbus 串口连接: 端口={_serialPort.PortName}, 波特率={_serialPort.BaudRate}, 数据位={_serialPort.DataBits}, 校验={_serialPort.Parity}, 停止位={_serialPort.StopBits}。");
+
+            try
             {
                 _serialPort.Open();
+                AppLogger.Info("Modbus 串口连接已成功打开。");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, $"打开 Modbus 串口连接失败: {ex.Message}");
+                throw;
             }
         }
 
@@ -347,7 +362,22 @@ namespace WpfVideoPet
             }
 
             _disposed = true;
-            _serialPort.Dispose();
+
+            try
+            {
+                if (_serialPort.IsOpen)
+                {
+                    AppLogger.Info("正在关闭 Modbus 串口连接。");
+                }
+
+                _serialPort.Dispose();
+                AppLogger.Info("Modbus 串口资源已释放。");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, $"释放 Modbus 串口资源时发生异常: {ex.Message}");
+            }
+
             _ioLock.Dispose();
             return ValueTask.CompletedTask;
         }
