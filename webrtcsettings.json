@@ -17,17 +17,34 @@
     "_comment_pageUrl": "承载 WebRTC 前端页面的地址，将在 WebView2 中加载。",
 
     "mqtt": {
+        "␊": null,
         "_comment": "MQTT 对接配置，可根据后端平台的实际分配进行调整。",
+        "␊": null,
         "enabled": true,
+        "␊": null,
         "serverUri": "tcp://106.52.194.56:1883",
-        "clientId": "lanmao001",  // 上位机唯一标识
-        "topic": "ts_lanmao001",  //默认主题
+        "␊": null,
+        "clientId": "lanmao001", // 上位机唯一标识␊
+        "topic": "ts_lanmao001", //默认主题␊
         "username": "admin",
         "password": "admin",
         "qos": 1,
         "cleanSession": false,
         "keepAliveInterval": 60,
         "connectionTimeout": 10
+    },
+
+    "modbus": {
+        "_comment": "RS485 继电器参数，启用后可通过 Modbus RTU 读写 8 路 IO。",
+        "enabled": false,
+        "portName": "COM3",
+        "baudRate": 38400,
+        "parity": "None",
+        "dataBits": 8,
+        "stopBits": "One",
+        "slaveAddress": 1,
+        "readTimeout": 1000,
+        "writeTimeout": 1000
     },
 
     "audio": {

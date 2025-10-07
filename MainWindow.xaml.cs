@@ -2,6 +2,7 @@
 using Microsoft.Win32;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -45,16 +46,15 @@ namespace WpfVideoPet
             InitializeComponent();
             _appConfig = AppConfig.Load(null);
             _audioDuckingConfig = _appConfig.AudioDucking;
-            var cacheRoot = Path.Combine(
-                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                 "WpfVideoPet",
-                 "MediaCache");
-            _mediaCacheDirectory = cacheRoot;
-            Directory.CreateDirectory(_mediaCacheDirectory);
+            _mediaCacheDirectory = EnsureMediaCacheDirectory(out var cacheInitWarning);
 
             var logDirectory = Path.Combine(Path.GetDirectoryName(_mediaCacheDirectory) ?? _mediaCacheDirectory, "Logs");
             AppLogger.Initialize(logDirectory);
             AppLogger.Info($"应用启动，媒体缓存目录: {_mediaCacheDirectory}");
+            if (!string.IsNullOrWhiteSpace(cacheInitWarning))
+            {
+                AppLogger.Warn(cacheInitWarning);
+            }
 
             Core.Initialize();
 
@@ -915,6 +915,71 @@ namespace WpfVideoPet
             return value;
         }
 
+        private static string EnsureMediaCacheDirectory(out string? warningMessage)
+        {
+            warningMessage = null;
+            var failures = new List<string>();
+            var candidates = new List<string?>
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                AppDomain.CurrentDomain.BaseDirectory
+            };
+
+            foreach (var candidate in candidates)
+            {
+                if (string.IsNullOrWhiteSpace(candidate))
+                {
+                    continue;
+                }
+
+                var cachePath = Path.Combine(candidate, "WpfVideoPet", "MediaCache");
+
+                try
+                {
+                    Directory.CreateDirectory(cachePath);
+
+                    if (failures.Count > 0)
+                    {
+                        warningMessage = $"无法在预期目录创建媒体缓存，已回退至 {cachePath}。详细信息: {string.Join("; ", failures)}";
+                    }
+
+                    return cachePath;
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+                {
+                    failures.Add($"{cachePath} ({ex.Message})");
+                }
+            }
+
+            if (OperatingSystem.IsWindows())
+            {
+                const string windowsFallback = @"C:\\WpfVideoPet\\MediaCache";
+                try
+                {
+                    Directory.CreateDirectory(windowsFallback);
+
+                    warningMessage = failures.Count > 0
+                        ? $"媒体缓存目录最终回退到 {windowsFallback}。无法创建的位置: {string.Join("; ", failures)}"
+                        : $"无法确定本地应用数据目录，媒体缓存目录已设置为 {windowsFallback}。";
+
+                    return windowsFallback;
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+                {
+                    failures.Add($"{windowsFallback} ({ex.Message})");
+                }
+            }
+
+            var tempCache = Path.Combine(Path.GetTempPath(), "WpfVideoPet", "MediaCache");
+            Directory.CreateDirectory(tempCache);
+
+            warningMessage = failures.Count > 0
+                ? $"媒体缓存目录最终回退到临时目录 {tempCache}。无法创建的位置: {string.Join("; ", failures)}"
+                : $"无法确定本地应用数据目录，媒体缓存目录已设置为临时路径 {tempCache}。";
+
+            return tempCache;
+        }
 
         /// <summary>
         /// 校验文件的哈希是否与预期一致。

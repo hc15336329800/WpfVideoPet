@@ -19,6 +19,7 @@
 		<PackageReference Include="MQTTnet" Version="4.3.2" />
 		<PackageReference Include="LibVLCSharp.WPF" Version="3.9.4" />
 		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2592.51" />
+		<PackageReference Include="System.IO.Ports" Version="9.0.9" />
 		<PackageReference Include="System.Speech" Version="9.0.9" />
 		<PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" />
 	</ItemGroup>

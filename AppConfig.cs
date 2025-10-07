@@ -2,6 +2,7 @@
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.IO.Ports;
 
 namespace WpfVideoPet
 {
@@ -15,6 +16,7 @@ namespace WpfVideoPet
 
         public MqttConfig Mqtt { get; } = new();
         public AudioDuckingConfig AudioDucking { get; } = new();
+        public ModbusConfig Modbus { get; } = new();
 
         public bool IsOperator => string.Equals(Role, "operator", StringComparison.OrdinalIgnoreCase);
 
@@ -158,6 +160,68 @@ namespace WpfVideoPet
                             {
                                 ducking.RestoreDelaySeconds = Math.Max(0, restoreDelaySeconds);
                             }
+                        }
+                    }
+
+                    if (root.TryGetProperty("modbus", out var modbusElement) && modbusElement.ValueKind == JsonValueKind.Object)
+                    {
+                        var modbus = config.Modbus;
+
+                        if (modbusElement.TryGetProperty("enabled", out var enabledElement) && enabledElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        {
+                            modbus.Enabled = enabledElement.GetBoolean();
+                        }
+
+                        if (modbusElement.TryGetProperty("portName", out var portElement))
+                        {
+                            var value = portElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                modbus.PortName = value.Trim();
+                            }
+                        }
+
+                        if (modbusElement.TryGetProperty("baudRate", out var baudElement) && baudElement.TryGetInt32(out var baudRate))
+                        {
+                            modbus.BaudRate = Math.Clamp(baudRate, 300, 921600);
+                        }
+
+                        if (modbusElement.TryGetProperty("parity", out var parityElement))
+                        {
+                            var value = parityElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(value) && Enum.TryParse<Parity>(value, true, out var parity))
+                            {
+                                modbus.Parity = parity;
+                            }
+                        }
+
+                        if (modbusElement.TryGetProperty("dataBits", out var dataBitsElement) && dataBitsElement.TryGetInt32(out var dataBits))
+                        {
+                            modbus.DataBits = Math.Clamp(dataBits, 5, 8);
+                        }
+
+                        if (modbusElement.TryGetProperty("stopBits", out var stopBitsElement))
+                        {
+                            var value = stopBitsElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(value) && Enum.TryParse<StopBits>(value, true, out var stopBits) && stopBits is not StopBits.None)
+                            {
+                                modbus.StopBits = stopBits;
+                            }
+                        }
+
+                        if (modbusElement.TryGetProperty("slaveAddress", out var slaveElement) && slaveElement.TryGetInt32(out var slaveAddress))
+                        {
+                            modbus.SlaveAddress = (byte)Math.Clamp(slaveAddress, 1, 247);
+                        }
+
+                        if (modbusElement.TryGetProperty("readTimeout", out var readTimeoutElement) && readTimeoutElement.TryGetInt32(out var readTimeout))
+                        {
+                            modbus.ReadTimeout = Math.Max(0, readTimeout);
+                        }
+
+                        if (modbusElement.TryGetProperty("writeTimeout", out var writeTimeoutElement) && writeTimeoutElement.TryGetInt32(out var writeTimeout))
+                        {
+                            modbus.WriteTimeout = Math.Max(0, writeTimeout);
                         }
                     }
                 }
