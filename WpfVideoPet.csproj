@@ -15,29 +15,15 @@
 		</Content>
 	</ItemGroup>
 
+
+	<!-- 希望少维护清单，也可以直接把 DLL\ 下面的所有文件都复制过去：-->
 	<ItemGroup>
-		<Content Include="DLL\resource\**\*">
-			<Link>resource\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		<Content Include="DLL\**\*">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</Content>
-		<Content Include="DLL\keyword.txt">
-			<Link>keyword.txt</Link>
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</Content>
-		<Content Include="DLL\AEE_lib.dll">
-			<Link>AEE_lib.dll</Link>
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</Content>
-		<Content Include="DLL\ef7d69542_v1014_aee.dll">
-			<Link>ef7d69542_v1014_aee.dll</Link>
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</Content>
-		<Content Include="DLL\AikitNet.dll">
-			<Link>AikitNet.dll</Link>
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<!-- 可选：把文件释放出来  而不是复制文件夹 -->
+			<Link>%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Content>
 	</ItemGroup>
-
  
 
 	<ItemGroup>
