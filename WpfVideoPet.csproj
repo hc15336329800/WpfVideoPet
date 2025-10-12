@@ -18,11 +18,14 @@
 
 	<!-- 希望少维护清单，也可以直接把 DLL\ 下面的所有文件都复制过去：-->
 	<ItemGroup>
-		<Content Include="DLL\**\*">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-			<!-- 可选：把文件释放出来  而不是复制文件夹 -->
-			<Link>%(RecursiveDir)%(Filename)%(Extension)</Link>
-		</Content>
+	  <Compile Remove="DLL - 复制\**" />
+	  <Compile Remove="doc\**" />
+	  <EmbeddedResource Remove="DLL - 复制\**" />
+	  <EmbeddedResource Remove="doc\**" />
+	  <None Remove="DLL - 复制\**" />
+	  <None Remove="doc\**" />
+	  <Page Remove="DLL - 复制\**" />
+	  <Page Remove="doc\**" />
 	</ItemGroup>
 
  
@@ -48,10 +51,6 @@
 		<None Update="webrtcsettings.json">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
-	</ItemGroup>
-
-	<ItemGroup>
-	  <Folder Include="doc\" />
 	</ItemGroup>
 
 	<Target Name="EnsureWpfVideoPetNotRunning" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT'">

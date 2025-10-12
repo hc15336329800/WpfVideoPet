@@ -59,9 +59,7 @@ namespace WpfVideoPet
         private static extern int AD_EndWakeSession();
 
         private static readonly string[] KnownSdkDirectories =
-        {
-   @"C:\Users\zhangguoren\Desktop\AikitDLL 动态库完整调用例子 - 2026\AikitDLL 动态库完整调用例子 - 2026\xunfeisdk\AikitNet\DLL",
-            @"D:\C#_code\WpfVideoPet\DLL"        };
+        {  @"D:\C#_code\WpfVideoPet\DLL"        };
 
         private readonly string? _externalSdkDirectory;
         private readonly object _syncRoot = new();
