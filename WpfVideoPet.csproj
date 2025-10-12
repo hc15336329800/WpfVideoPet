@@ -15,6 +15,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
+	  <Content Include="AikitNet\.vs\AikitNet.csproj.dtbcache.json" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<PackageReference Include="HelixToolkit.Wpf" Version="2.27.3" />
 		<PackageReference Include="MQTTnet" Version="4.3.2" />
 		<PackageReference Include="LibVLCSharp.WPF" Version="3.9.4" />
@@ -32,6 +36,19 @@
 		<None Update="webrtcsettings.json">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="AikitNet\bin\Debug\" />
+	  <Folder Include="AikitNet\obj\Debug\TempPE\" />
+	  <Folder Include="AikitNet\obj\x64\Debug\TempPE\" />
+	  <Folder Include="AikitNet\obj\x86\Debug\TempPE\" />
+	  <Folder Include="doc\" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Include="AikitNet\AikitNet.csproj" />
+	  <None Include="AikitNet\AikitNet.csproj.user" />
 	</ItemGroup>
 
 	<Target Name="EnsureWpfVideoPetNotRunning" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT'">

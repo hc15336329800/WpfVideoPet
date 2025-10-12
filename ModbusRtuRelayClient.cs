@@ -58,7 +58,27 @@ namespace WpfVideoPet
             var request = BuildWriteSingleCoilFrame(address, isOn);
             await SendAndValidateAsync(request, 0x05, cancellationToken).ConfigureAwait(false);
         }
+        /// <summary>
+        /// 读取指定继电器（线圈）的当前状态，返回 <c>true</c> 表示继电器处于导通/打开状态。
+        /// </summary>
+        /// <param name="channelIndex">继电器编号（1-8）。</param>
+        /// <param name="cancellationToken">取消标记。</param>
+        /// <returns>继电器的开关状态。</returns>
+        /// <exception cref="ArgumentOutOfRangeException">当编号超出 1-8 范围时抛出。</exception>
+        public async Task<bool> ReadChannelStateAsync(int channelIndex, CancellationToken cancellationToken = default)
+        {
+            EnsureNotDisposed();
 
+            if (channelIndex is < 1 or > 8)
+            {
+                throw new ArgumentOutOfRangeException(nameof(channelIndex), channelIndex, "通道索引必须在 1-8 之间。");
+            }
+
+            // 设备文档说明：0000H 对应 1 号继电器，0001H 对应 2 号，以此类推。
+            var address = channelIndex - 1;
+            var coils = await ReadCoilsAsync(address, 1, cancellationToken).ConfigureAwait(false);
+            return coils.Length > 0 && coils[0];
+        }
         public async Task SetAllChannelsAsync(IReadOnlyList<bool> states, CancellationToken cancellationToken = default)
         {
             EnsureNotDisposed();

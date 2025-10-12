@@ -1312,9 +1312,8 @@ namespace WpfVideoPet
             {
                 try
                 {
-                    // 读取线圈地址 0（即 1 号继电器）的当前状态。
-                    var coils = await client.ReadCoilsAsync(0, 1, token).ConfigureAwait(false);
-                    var isRelayClosed = coils.Length > 0 && coils[0];
+                    // 直接读取 1 号继电器（0000H 线圈）的状态。返回 true 代表命令 FF 05 00 00 FF 00 已生效，继电器闭合。
+                    var isRelayClosed = await client.ReadChannelStateAsync(1, token).ConfigureAwait(false);
 
                     if (lastRelayState != isRelayClosed)
                     {
@@ -1327,7 +1326,15 @@ namespace WpfVideoPet
                             _ = Dispatcher.BeginInvoke(new Action(() =>
                             {
                                 AppLogger.Info("继电器 1 闭合，准备弹出视频窗口。");
-                                ShowVideoCallWindow();
+
+                                if (_videoCallWindow is null || !_videoCallWindow.IsVisible)
+                                {
+                                    ShowVideoCallWindow();
+                                }
+                                else
+                                {
+                                    AppLogger.Info("视频窗口已存在，本次不重复弹出。");
+                                }
                             }));
                         }
                     }
