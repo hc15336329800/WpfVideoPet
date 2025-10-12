@@ -1310,20 +1310,9 @@ namespace WpfVideoPet
                 return;
             }
 
-            try
-            {
-                _modbusClient = new ModbusRtuRelayClient(modbusConfig);
-                _modbusCts = new CancellationTokenSource();
-                var token = _modbusCts.Token;
-
-                // 在后台线程中一直监听 1 号继电器状态，直到程序退出。
-                _modbusMonitorTask = Task.Run(() => MonitorRelayLoopAsync(_modbusClient, token), token);
-                AppLogger.Info("Modbus 继电器监听已启动。");
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error(ex, $"初始化 Modbus 客户端失败: {ex.Message}");
-            }
+            // 需求变更：不再在启动阶段主动监听 Modbus RTU 继电器，避免持续占用串口资源。
+            // 保留配置开关以便后续按需扩展。
+            AppLogger.Info("已关闭 Modbus 继电器的主动监听，不再启动后台轮询任务。");
         }
 
         /// <summary>
