@@ -7,6 +7,7 @@ using System.Runtime.Versioning;
 using System.Text;
 using System.Threading;
 using System.Collections.Generic;
+using System.Text.Json;
 
 namespace WpfVideoPet
 {
@@ -104,6 +105,11 @@ namespace WpfVideoPet
         public event EventHandler? WakeTriggered;
 
         /// <summary>
+        /// 识别到具体唤醒词时触发，便于界面层展示提示或执行差异化业务逻辑。
+        /// </summary>
+        public event EventHandler<WakeKeywordEventArgs>? WakeKeywordRecognized;
+
+        /// <summary>
         /// 将控制台程序中的初始化逻辑迁移到 WPF 常驻服务。
         /// </summary>
         /// <returns>启动成功返回 true。</returns>
@@ -163,7 +169,11 @@ namespace WpfVideoPet
                 _initialized = false;
             }
         }
-
+      
+        
+        /// <summary>
+        /// 完成原生唤醒引擎的初始化，包括依赖复制、回调注册与会话启动。
+        /// </summary>
         private void InitializeEngine()
         {
             var baseDirectory = AppContext.BaseDirectory;
@@ -239,6 +249,9 @@ namespace WpfVideoPet
             AppLogger.Info("Aikit 唤醒引擎初始化完成，等待麦克风数据。");
         }
 
+        /// <summary>
+        /// 初始化麦克风采集并订阅录音事件，将音频流喂入唤醒引擎。
+        /// </summary>
         private void StartMicrophone()
         {
             _mic = new WaveInEvent
@@ -257,6 +270,13 @@ namespace WpfVideoPet
             AppLogger.Info("Aikit 唤醒服务已开始监听麦克风 (16kHz/16bit/Mono, 20ms 缓冲)。");
         }
 
+
+        /// <summary>
+        /// 处理唤醒引擎输出，根据关键字触发唤醒事件或记录日志。
+        /// </summary>
+        /// <param name="abilityPtr">能力标识指针。</param>
+        /// <param name="keyPtr">输出键名指针。</param>
+        /// <param name="valuePtr">输出值指针。</param>
         private void OnWakeOutput(IntPtr abilityPtr, IntPtr keyPtr, IntPtr valuePtr)
         {
             var key = PtrToUtf8(keyPtr);
@@ -264,7 +284,17 @@ namespace WpfVideoPet
 
             if (key == "func_wake_up" || key == "rlt")
             {
-                AppLogger.Info($"检测到唤醒词：{value}");
+                if (TryGetKeyword(value, out var keyword))
+                {
+                    AppLogger.Info($"检测到唤醒词：{keyword}");
+                    HandleWakeKeyword(keyword!);
+                }
+                else
+                {
+                    AppLogger.Warn($"唤醒回调未能解析 keyword 字段：{value}");
+                    AppLogger.Info("请检查回调 JSON 是否包含 keyword 字段，确认 keyword.txt 为 UTF-8 且每行以分号结尾，并确保 AD_LoadKeywordFile/AD_SpecifyKeywordSet 参数一致。");
+                }
+
                 PlayDing();
                 WakeTriggered?.Invoke(this, EventArgs.Empty);
             }
@@ -274,6 +304,70 @@ namespace WpfVideoPet
             }
         }
 
+        /// <summary>
+        /// 从唤醒回调 JSON 串中提取 keyword 字段，返回是否解析成功。
+        /// </summary>
+        /// <param name="json">回调给定的 JSON 文本。</param>
+        /// <param name="keyword">成功时输出的唤醒词。</param>
+        private bool TryGetKeyword(string? json, out string? keyword)
+        {
+            keyword = null;
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(json);
+                if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                    document.RootElement.TryGetProperty("keyword", out var keywordElement) &&
+                    keywordElement.ValueKind == JsonValueKind.String)
+                {
+                    keyword = keywordElement.GetString();
+                    return !string.IsNullOrWhiteSpace(keyword);
+                }
+
+                AppLogger.Warn($"唤醒回调 JSON 中未找到 keyword 字段：{json}");
+                return false;
+            }
+            catch (JsonException ex)
+            {
+                AppLogger.Warn($"唤醒回调 JSON 解析失败：{ex.Message}。原始数据：{json}");
+                AppLogger.Info("若多次解析失败，可检查 keyword.txt 格式、回调内容编码以及是否被其他模块修改。");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 根据唤醒词执行对应业务逻辑，可在此扩展自定义操作。
+        /// </summary>
+        /// <param name="keyword">成功解析到的唤醒词。</param>
+        private void HandleWakeKeyword(string keyword)
+        {
+            string? notification = null;
+
+            switch (keyword)
+            {
+                case "小白小白":
+                    AppLogger.Info("触发“小白小白”业务逻辑：例如启动语音助手或开启常用功能。");
+                    notification = "已唤醒“小白小白”，正在为您准备常用功能。";
+                    break;
+                case "小黄小黄":
+                    AppLogger.Info("触发“小黄小黄”业务逻辑：例如播报天气或执行定制命令。");
+                    notification = "已唤醒“小黄小黄”，即将为您播报定制内容。";
+                    break;
+                default:
+                    AppLogger.Info($"唤醒词 {keyword} 未绑定特定逻辑，执行默认处理。");
+                    break;
+            }
+
+            WakeKeywordRecognized?.Invoke(this, new WakeKeywordEventArgs(keyword, notification));
+        }
+
+        /// <summary>
+        /// 播放提示音提示唤醒成功，若提示音文件不存在则尝试使用蜂鸣器。
+        /// </summary>
         private void PlayDing()
         {
             try
@@ -325,6 +419,11 @@ namespace WpfVideoPet
             }
         }
 
+        /// <summary>
+        /// 麦克风缓冲区回调，将 PCM 数据写入唤醒引擎。
+        /// </summary>
+        /// <param name="sender">事件源。</param>
+        /// <param name="args">录音缓冲区数据。</param>
         private void OnMicDataAvailable(object? sender, WaveInEventArgs args)
         {
             try
@@ -345,6 +444,11 @@ namespace WpfVideoPet
             }
         }
 
+        /// <summary>
+        /// 麦克风录音结束回调，记录异常终止信息。
+        /// </summary>
+        /// <param name="sender">事件源。</param>
+        /// <param name="args">停止事件参数。</param>
         private void OnMicRecordingStopped(object? sender, StoppedEventArgs args)
         {
             if (args.Exception != null)
@@ -353,6 +457,11 @@ namespace WpfVideoPet
             }
         }
 
+        /// <summary>
+        /// 将指向 UTF-8 文本的非托管指针转换为托管字符串。
+        /// </summary>
+        /// <param name="ptr">UTF-8 文本指针。</param>
+        /// <returns>转换后的托管字符串。</returns>
         private static string PtrToUtf8(IntPtr ptr)
         {
             if (ptr == IntPtr.Zero)
@@ -371,6 +480,11 @@ namespace WpfVideoPet
             return Encoding.UTF8.GetString(bytes);
         }
 
+        /// <summary>
+        /// 判断字符串是否仅包含 ASCII 字符。
+        /// </summary>
+        /// <param name="value">待检测字符串。</param>
+        /// <returns>全部为 ASCII 时返回 true。</returns>
         private static bool IsPureAscii(string value)
         {
             if (string.IsNullOrEmpty(value))
@@ -389,6 +503,11 @@ namespace WpfVideoPet
             return true;
         }
 
+        /// <summary>
+        /// 将原生错误码转换为易读的中文描述。
+        /// </summary>
+        /// <param name="code">原生错误码。</param>
+        /// <returns>对应的中文描述。</returns>
         private static string TranslateError(int code)
         {
             return code switch
@@ -407,6 +526,9 @@ namespace WpfVideoPet
             };
         }
 
+        /// <summary>
+        /// 停止麦克风、结束会话并释放原生资源。
+        /// </summary>
         private void StopInternal()
         {
             try
@@ -478,6 +600,11 @@ namespace WpfVideoPet
                 }
             }
         }
+        /// <summary>
+        /// 确保原生依赖完整存在，必要时尝试从候选目录复制。
+        /// </summary>
+        /// <param name="baseDirectory">应用根目录。</param>
+        /// <returns>唤醒词文件的绝对路径。</returns>
         private string EnsureNativeDependencies(string baseDirectory)
         {
             if (TryVerifyNativeDependencies(baseDirectory, out _, out var baseMissing))
@@ -523,6 +650,13 @@ namespace WpfVideoPet
             return VerifyNativeDependencies(baseDirectory);
         }
 
+        /// <summary>
+        /// 检查指定目录下的原生依赖是否齐全。
+        /// </summary>
+        /// <param name="baseDirectory">待检测目录。</param>
+        /// <param name="keywordFullPath">检测到的唤醒词文件路径。</param>
+        /// <param name="missing">缺失项集合。</param>
+        /// <returns>依赖完整时返回 true。</returns>
         private static bool TryVerifyNativeDependencies(string baseDirectory, out string keywordFullPath, out List<string> missing)
         {
             missing = new List<string>();
@@ -550,6 +684,11 @@ namespace WpfVideoPet
             return missing.Count == 0;
         }
 
+        /// <summary>
+        /// 强制校验原生依赖，缺失时抛出异常。
+        /// </summary>
+        /// <param name="baseDirectory">依赖所在目录。</param>
+        /// <returns>唤醒词文件的绝对路径。</returns>
         private static string VerifyNativeDependencies(string baseDirectory)
         {
             if (!TryVerifyNativeDependencies(baseDirectory, out var keywordFullPath, out var missing))
@@ -569,6 +708,11 @@ namespace WpfVideoPet
             return keywordFullPath;
         }
 
+        /// <summary>
+        /// 获取唤醒引擎运行所需的关键文件映射。
+        /// </summary>
+        /// <param name="baseDirectory">依赖所在目录。</param>
+        /// <returns>文件名称与完整路径的集合。</returns>
         private static IEnumerable<(string Name, string Path)> GetNativeDependencyMap(string baseDirectory)
         {
             yield return ("AikitDll.dll", Path.Combine(baseDirectory, "AikitDll.dll"));
@@ -576,6 +720,11 @@ namespace WpfVideoPet
             yield return ("ef7d69542_v1014_aee.dll", Path.Combine(baseDirectory, "ef7d69542_v1014_aee.dll"));
         }
 
+        /// <summary>
+        /// 遍历可能的 SDK 目录，去重后返回可用路径。
+        /// </summary>
+        /// <param name="baseDirectory">应用根目录。</param>
+        /// <returns>候选 SDK 目录集合。</returns>
         private IEnumerable<string> EnumerateCandidateSdkDirectories(string baseDirectory)
         {
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -604,6 +753,11 @@ namespace WpfVideoPet
             }
         }
 
+        /// <summary>
+        /// 枚举候选 SDK 目录，包含外部传参、环境变量与默认路径。
+        /// </summary>
+        /// <param name="baseDirectory">应用根目录。</param>
+        /// <returns>候选目录序列。</returns>
         private IEnumerable<string?> GetCandidateSdkDirectories(string baseDirectory)
         {
             if (!string.IsNullOrWhiteSpace(_externalSdkDirectory))
@@ -624,7 +778,11 @@ namespace WpfVideoPet
                 yield return known;
             }
         }
-
+        /// <summary>
+        /// 将 SDK 目录下的 DLL 与资源复制到目标目录。
+        /// </summary>
+        /// <param name="sourceDirectory">源目录。</param>
+        /// <param name="targetDirectory">目标目录。</param>
         private static void CopySdkPayload(string sourceDirectory, string targetDirectory)
         {
             Directory.CreateDirectory(targetDirectory);
@@ -645,7 +803,11 @@ namespace WpfVideoPet
                 AppLogger.Info($"复制 resource 目录: {sourceResourceDir} -> {targetResourceDir}");
             }
         }
-
+        /// <summary>
+        /// 递归复制目录及其文件，用于迁移 resource 资源。
+        /// </summary>
+        /// <param name="sourceDir">源目录。</param>
+        /// <param name="targetDir">目标目录。</param>
         private static void CopyDirectoryRecursively(string sourceDir, string targetDir)
         {
             Directory.CreateDirectory(targetDir);
@@ -663,7 +825,11 @@ namespace WpfVideoPet
                 File.Copy(file, destination, true);
             }
         }
-
+        /// <summary>
+        /// 递归复制目录及其文件，用于迁移 resource 资源。
+        /// </summary>
+        /// <param name="sourceDir">源目录。</param>
+        /// <param name="targetDir">目标目录。</param>
         private void ThrowIfDisposed()
         {
             if (_disposed)
@@ -684,5 +850,31 @@ namespace WpfVideoPet
             _disposed = true;
             GC.SuppressFinalize(this);
         }
+    }
+    /// <summary>
+    /// 唤醒词识别事件参数，包含关键词与可选的提示消息。
+    /// </summary>
+    public sealed class WakeKeywordEventArgs : EventArgs
+    {
+        /// <summary>
+        /// 使用给定的唤醒词与提示消息构造事件参数。
+        /// </summary>
+        /// <param name="keyword">识别到的唤醒词。</param>
+        /// <param name="notificationMessage">可选的提示消息，可用于界面层展示。</param>
+        public WakeKeywordEventArgs(string keyword, string? notificationMessage)
+        {
+            Keyword = keyword;
+            NotificationMessage = notificationMessage;
+        }
+
+        /// <summary>
+        /// 识别到的唤醒词内容。
+        /// </summary>
+        public string Keyword { get; }
+
+        /// <summary>
+        /// 供界面展示的提示消息，可能为空。
+        /// </summary>
+        public string? NotificationMessage { get; }
     }
 }

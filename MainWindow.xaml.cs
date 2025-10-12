@@ -1197,6 +1197,7 @@ namespace WpfVideoPet
             Closed -= OnMainWindowClosed;
 
             _wakeService.WakeTriggered -= OnWakeTriggered;
+            _wakeService.WakeKeywordRecognized -= OnWakeKeywordRecognized;
             _wakeService.Dispose();
 
             if (_mqttService != null)
@@ -1260,10 +1261,44 @@ namespace WpfVideoPet
         private void InitializeWakeService()
         {
             _wakeService.WakeTriggered += OnWakeTriggered;
+            _wakeService.WakeKeywordRecognized += OnWakeKeywordRecognized;
 
             if (!_wakeService.Start())
             {
                 AppLogger.Warn("Aikit 唤醒服务未能成功启动，语音唤醒将不可用。");
+            }
+        }
+
+        private void OnWakeKeywordRecognized(object? sender, WakeKeywordEventArgs e)
+        {
+            void Show()
+            {
+                if (string.IsNullOrWhiteSpace(e.NotificationMessage))
+                {
+                    return;
+                }
+
+                if (_overlay != null)
+                {
+                    _overlay.ShowNotification(e.NotificationMessage!, TimeSpan.FromSeconds(5));
+                }
+                else
+                {
+                    MessageBox.Show(this,
+                        e.NotificationMessage!,
+                        "提示",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+            }
+
+            if (Dispatcher.CheckAccess())
+            {
+                Show();
+            }
+            else
+            {
+                Dispatcher.BeginInvoke((Action)Show);
             }
         }
 
