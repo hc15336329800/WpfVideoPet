@@ -324,8 +324,16 @@ namespace WpfVideoPet
                     document.RootElement.TryGetProperty("keyword", out var keywordElement) &&
                     keywordElement.ValueKind == JsonValueKind.String)
                 {
-                    keyword = keywordElement.GetString();
-                    return !string.IsNullOrWhiteSpace(keyword);
+                    // 为排查唤醒词匹配失败问题，去除首尾空白并输出诊断日志。
+                    keyword = keywordElement.GetString()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(keyword))
+                    {
+                        AppLogger.Info($"解析到唤醒词: '{keyword}' (长度 {keyword.Length})。");
+                        return true;
+                    }
+
+                    AppLogger.Warn($"唤醒回调 keyword 字段为空或仅包含空白字符：{json}");
+                    return false;
                 }
 
                 AppLogger.Warn($"唤醒回调 JSON 中未找到 keyword 字段：{json}");
@@ -346,6 +354,9 @@ namespace WpfVideoPet
         private void HandleWakeKeyword(string keyword)
         {
             string? notification = null;
+
+            // 增加原始唤醒词日志，辅助定位未进入分支的情况。
+            AppLogger.Info($"准备执行唤醒词业务逻辑，原始内容: '{keyword}' (长度 {keyword.Length})。");
 
             switch (keyword)
             {
