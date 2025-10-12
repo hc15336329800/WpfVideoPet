@@ -16,30 +16,29 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<Content Include="AikitNet\DLL\resource\**\*">
+		<Content Include="DLL\resource\**\*">
 			<Link>resource\%(RecursiveDir)%(Filename)%(Extension)</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
-		<Content Include="AikitNet\DLL\keyword.txt">
+		<Content Include="DLL\keyword.txt">
 			<Link>keyword.txt</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
-		<Content Include="AikitNet\DLL\AEE_lib.dll">
+		<Content Include="DLL\AEE_lib.dll">
 			<Link>AEE_lib.dll</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
-		<Content Include="AikitNet\DLL\ef7d69542_v1014_aee.dll">
+		<Content Include="DLL\ef7d69542_v1014_aee.dll">
 			<Link>ef7d69542_v1014_aee.dll</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+		<Content Include="DLL\AikitNet.dll">
+			<Link>AikitNet.dll</Link>
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</Content>
 	</ItemGroup>
 
-	<ItemGroup>
-	  <Compile Remove="AikitNet\**" />
-	  <EmbeddedResource Remove="AikitNet\**" />
-	  <None Remove="AikitNet\**" />
-	  <Page Remove="AikitNet\**" />
-	</ItemGroup>
+ 
 
 	<ItemGroup>
 		<PackageReference Include="HelixToolkit.Wpf" Version="2.27.3" />

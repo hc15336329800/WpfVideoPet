@@ -1,13 +1,14 @@
 ﻿using Microsoft.VisualBasic;
 using NAudio.Wave;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
-using System.Threading;
-using System.Collections.Generic;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace WpfVideoPet
 {
@@ -232,7 +233,7 @@ namespace WpfVideoPet
             }
 
             var specifyResult = AD_SpecifyKeywordSet(AbilityId, KeywordKey, 0);
-            AppLogger.Info($"AD_LoadKeywordFile 返回代码: {loadResult}");
+            AppLogger.Info($"AD_SpecifyKeywordSet 返回代码: {specifyResult}");
             if (specifyResult != 0)
             {
                 throw new InvalidOperationException($"激活唤醒词集合失败：{specifyResult} ({TranslateError(specifyResult)})");
@@ -284,6 +285,11 @@ namespace WpfVideoPet
 
             if (key == "func_wake_up" || key == "rlt")
             {
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    AppLogger.Info($"唤醒回调原始数据: {value}");
+                }
+
                 if (TryGetKeyword(value, out var keyword))
                 {
                     AppLogger.Info($"检测到唤醒词：{keyword}");
@@ -317,6 +323,51 @@ namespace WpfVideoPet
                 return false;
             }
 
+            if (TryExtractKeyword(json, out keyword, out var warning, out var parseError))
+            {
+                keyword = NormalizeKeyword(keyword);
+                return !string.IsNullOrWhiteSpace(keyword);
+            }
+
+            var fixedJson = FixKeywordInJson(json);
+            if (!string.Equals(fixedJson, json, StringComparison.Ordinal))
+            {
+                AppLogger.Info("检测到唤醒回调疑似 UTF-8 乱码，尝试自动纠正 keyword 字段后重新解析。");
+                if (TryExtractKeyword(fixedJson, out keyword, out var fixedWarning, out var fixedParseError))
+                {
+                    keyword = NormalizeKeyword(keyword);
+                    return !string.IsNullOrWhiteSpace(keyword);
+                }
+
+                if (!string.IsNullOrEmpty(fixedParseError))
+                {
+                    AppLogger.Warn($"{fixedParseError}原始数据：{fixedJson}");
+                }
+                else if (!string.IsNullOrEmpty(fixedWarning))
+                {
+                    AppLogger.Warn($"{fixedWarning}原始数据：{fixedJson}");
+                }
+            }
+
+            if (!string.IsNullOrEmpty(parseError))
+            {
+                AppLogger.Warn($"{parseError}原始数据：{json}");
+            }
+            else if (!string.IsNullOrEmpty(warning))
+            {
+                AppLogger.Warn($"{warning}原始数据：{json}");
+            }
+
+            AppLogger.Info("若多次解析失败，可检查 keyword.txt 格式、回调内容编码以及是否被其他模块修改。");
+            return false;
+        }
+
+        private static bool TryExtractKeyword(string json, out string? keyword, out string? warning, out string? parseError)
+        {
+            keyword = null;
+            warning = null;
+            parseError = null;
+
             try
             {
                 using var document = JsonDocument.Parse(json);
@@ -324,27 +375,82 @@ namespace WpfVideoPet
                     document.RootElement.TryGetProperty("keyword", out var keywordElement) &&
                     keywordElement.ValueKind == JsonValueKind.String)
                 {
-                    // 为排查唤醒词匹配失败问题，去除首尾空白并输出诊断日志。
-                    keyword = keywordElement.GetString()?.Trim();
-                    if (!string.IsNullOrWhiteSpace(keyword))
-                    {
-                        AppLogger.Info($"解析到唤醒词: '{keyword}' (长度 {keyword.Length})。");
-                        return true;
-                    }
-
-                    AppLogger.Warn($"唤醒回调 keyword 字段为空或仅包含空白字符：{json}");
-                    return false;
+                    keyword = keywordElement.GetString();
+                    return true;
                 }
 
-                AppLogger.Warn($"唤醒回调 JSON 中未找到 keyword 字段：{json}");
+                warning = "唤醒回调 JSON 中未找到 keyword 字段。";
                 return false;
             }
             catch (JsonException ex)
             {
-                AppLogger.Warn($"唤醒回调 JSON 解析失败：{ex.Message}。原始数据：{json}");
-                AppLogger.Info("若多次解析失败，可检查 keyword.txt 格式、回调内容编码以及是否被其他模块修改。");
+                parseError = $"唤醒回调 JSON 解析失败：{ex.Message}。";
                 return false;
             }
+        }
+
+        private static string? NormalizeKeyword(string? keyword)
+        {
+            if (string.IsNullOrWhiteSpace(keyword))
+            {
+                return null;
+            }
+
+            var trimmed = keyword.Trim();
+            if (trimmed.Length == 0)
+            {
+                return null;
+            }
+
+            var fixedKeyword = FixUtf8Mojibake(trimmed);
+            if (!string.Equals(trimmed, fixedKeyword, StringComparison.Ordinal))
+            {
+                AppLogger.Info($"唤醒词编码已自动纠正：{trimmed} -> {fixedKeyword}");
+            }
+
+            return string.IsNullOrWhiteSpace(fixedKeyword) ? null : fixedKeyword;
+        }
+
+        private static string FixUtf8Mojibake(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return value;
+            }
+
+            try
+            {
+                if (Encoding.Default.CodePage == Encoding.UTF8.CodePage)
+                {
+                    return value;
+                }
+
+                var bytes = Encoding.Default.GetBytes(value);
+                var decoded = Encoding.UTF8.GetString(bytes);
+                return decoded.Contains('\uFFFD') ? value : decoded;
+            }
+            catch
+            {
+                return value;
+            }
+        }
+
+        private static string FixKeywordInJson(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return json;
+            }
+
+            return Regex.Replace(
+                json,
+                "(\\\"keyword\\\"\\s*:\\s*\\\")([^\\\"]*)(\\\")",
+                match =>
+                {
+                    var original = match.Groups[2].Value;
+                    var fixedKeyword = FixUtf8Mojibake(original);
+                    return match.Groups[1].Value + fixedKeyword + match.Groups[3].Value;
+                });
         }
 
         /// <summary>
