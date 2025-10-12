@@ -15,7 +15,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Content Include="AikitNet\.vs\AikitNet.csproj.dtbcache.json" />
+	  <Compile Remove="AikitNet\**" />
+	  <EmbeddedResource Remove="AikitNet\**" />
+	  <None Remove="AikitNet\**" />
+	  <Page Remove="AikitNet\**" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -23,6 +26,7 @@
 		<PackageReference Include="MQTTnet" Version="4.3.2" />
 		<PackageReference Include="LibVLCSharp.WPF" Version="3.9.4" />
 		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2592.51" />
+		<PackageReference Include="NAudio" Version="2.2.1" />
 		<PackageReference Include="System.IO.Ports" Version="9.0.9" />
 		<PackageReference Include="System.Speech" Version="9.0.9" />
 		<PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" />
@@ -39,16 +43,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Folder Include="AikitNet\bin\Debug\" />
-	  <Folder Include="AikitNet\obj\Debug\TempPE\" />
-	  <Folder Include="AikitNet\obj\x64\Debug\TempPE\" />
-	  <Folder Include="AikitNet\obj\x86\Debug\TempPE\" />
 	  <Folder Include="doc\" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <None Include="AikitNet\AikitNet.csproj" />
-	  <None Include="AikitNet\AikitNet.csproj.user" />
 	</ItemGroup>
 
 	<Target Name="EnsureWpfVideoPetNotRunning" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT'">

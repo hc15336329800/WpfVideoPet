@@ -45,6 +45,7 @@ namespace WpfVideoPet
         private ModbusRtuRelayClient? _modbusClient;
         private CancellationTokenSource? _modbusCts;
         private Task? _modbusMonitorTask;
+        private readonly AikitWakeService _wakeService;
 
         public MainWindow()
         {
@@ -110,6 +111,8 @@ namespace WpfVideoPet
             InitializeSpeechRecognition();
             InitializeMqttService();
             InitializeModbusMonitoring();
+            _wakeService = new AikitWakeService();
+            InitializeWakeService();
         }
 
         private void OnMainWindowLoaded(object sender, RoutedEventArgs e)
@@ -1185,7 +1188,7 @@ namespace WpfVideoPet
                 _ => null,
             };
         }
-        
+
         /// <summary>
         /// 主窗口关闭时释放 MQTT 与网络资源。
         /// </summary>
@@ -1193,59 +1196,81 @@ namespace WpfVideoPet
         {
             Closed -= OnMainWindowClosed;
 
+            _wakeService.WakeTriggered -= OnWakeTriggered;
+            _wakeService.Dispose();
+
             if (_mqttService != null)
             {
-                _mqttService.RemoteMediaTaskReceived -= OnRemoteMediaTaskReceived;
+                Closed -= OnMainWindowClosed;
 
-                try
+                if (_mqttService != null)
                 {
-                    await _mqttService.DisposeAsync().ConfigureAwait(false);
-                    AppLogger.Info("MQTT 服务已正常释放。");
-                }
-                catch (Exception ex)
-                {
-                    AppLogger.Error(ex, $"释放 MQTT 服务时发生异常: {ex.Message}");
-                }
-            }
+                    _mqttService.RemoteMediaTaskReceived -= OnRemoteMediaTaskReceived;
 
-            _httpClient.Dispose();
-            AppLogger.Info("主窗口关闭，HTTP 客户端资源已释放。");
+                    try
+                    {
+                        await _mqttService.DisposeAsync().ConfigureAwait(false);
+                        AppLogger.Info("MQTT 服务已正常释放。");
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Error(ex, $"释放 MQTT 服务时发生异常: {ex.Message}");
+                    }
+                }
 
-            if (_modbusCts != null)
-            {
-                _modbusCts.Cancel();
-            }
+                _httpClient.Dispose();
+                AppLogger.Info("主窗口关闭，HTTP 客户端资源已释放。");
 
-            if (_modbusMonitorTask != null)
-            {
-                try
+                if (_modbusCts != null)
                 {
-                    await _modbusMonitorTask.ConfigureAwait(false);
+                    _modbusCts.Cancel();
                 }
-                catch (OperationCanceledException)
-                {
-                    // 任务被取消属于正常流程，无需额外处理。
-                }
-                catch (Exception ex)
-                {
-                    AppLogger.Error(ex, $"等待 Modbus 监听任务结束时发生异常: {ex.Message}");
-                }
-            }
 
-            if (_modbusClient != null)
-            {
-                try
+                if (_modbusMonitorTask != null)
                 {
-                    await _modbusClient.DisposeAsync().ConfigureAwait(false);
-                    AppLogger.Info("Modbus 客户端资源已释放。");
+                    try
+                    {
+                        await _modbusMonitorTask.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // 任务被取消属于正常流程，无需额外处理。
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Error(ex, $"等待 Modbus 监听任务结束时发生异常: {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
+
+                if (_modbusClient != null)
                 {
-                    AppLogger.Error(ex, $"释放 Modbus 客户端时发生异常: {ex.Message}");
+                    try
+                    {
+                        await _modbusClient.DisposeAsync().ConfigureAwait(false);
+                        AppLogger.Info("Modbus 客户端资源已释放。");
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Error(ex, $"释放 Modbus 客户端时发生异常: {ex.Message}");
+                    }
                 }
             }
         }
 
+        private void InitializeWakeService()
+        {
+            _wakeService.WakeTriggered += OnWakeTriggered;
+
+            if (!_wakeService.Start())
+            {
+                AppLogger.Warn("Aikit 唤醒服务未能成功启动，语音唤醒将不可用。");
+            }
+        }
+
+        private void OnWakeTriggered(object? sender, EventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(ShowVideoCallWindow));
+        }
         private void ShowVideoCallWindow()
         {
             if (_videoCallWindow != null)
