@@ -24,6 +24,7 @@
 			<Link>%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Content>
 	</ItemGroup>
+
  
 
 	<ItemGroup>
@@ -36,6 +37,8 @@
 		<PackageReference Include="System.Speech" Version="9.0.9" />
 		<PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" />
 	</ItemGroup>
+
+
 	
 	<ItemGroup>
 		<Reference Include="System.Speech" />
