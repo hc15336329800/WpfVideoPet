@@ -207,8 +207,8 @@ namespace WpfVideoPet
                 var descText = PtrToUtf8(desc);
                 AppLogger.Error($"[Aikit 错误] {err} {descText}");
             };
+            int registerResult = AD_RegisterWakeCallbacks(_outputCallback, _eventCallback, _errorCallback);
             AppLogger.Info($"AD_RegisterWakeCallbacks 返回代码: {registerResult}");
-            var registerResult = AD_RegisterWakeCallbacks(_outputCallback, _eventCallback, _errorCallback);
             if (registerResult != 0)
             {
                 throw new InvalidOperationException($"注册唤醒回调失败：{registerResult} ({TranslateError(registerResult)})");
