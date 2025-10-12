@@ -60,8 +60,8 @@ namespace WpfVideoPet
 
         private static readonly string[] KnownSdkDirectories =
         {
-            @"C:\Users\zhangguoren\Desktop\AikitDLL 动态库完整调用例子 - 2026\AikitDLL 动态库完整调用例子 - 2026\xunfeisdk\AikitNet\DLL"
-        };
+   @"C:\Users\zhangguoren\Desktop\AikitDLL 动态库完整调用例子 - 2026\AikitDLL 动态库完整调用例子 - 2026\xunfeisdk\AikitNet\DLL",
+            @"D:\C#_code\WpfVideoPet\DLL"        };
 
         private readonly string? _externalSdkDirectory;
         private readonly object _syncRoot = new();
@@ -889,10 +889,55 @@ namespace WpfVideoPet
             }
 
             yield return Path.Combine(baseDirectory, "AikitNet", "DLL");
+            foreach (var parentDllDirectory in EnumerateParentDllDirectories(baseDirectory))
+            {
+                yield return parentDllDirectory;
+            }
 
             foreach (var known in KnownSdkDirectories)
             {
                 yield return known;
+            }
+        }
+
+
+        /// <summary>
+        /// 枚举以应用目录为起点逐级向上的 DLL 目录候选。
+        /// </summary>
+        /// <param name="baseDirectory">当前应用根目录。</param>
+        /// <returns>沿父目录向上可能存在 DLL 子目录的集合。</returns>
+        private static IEnumerable<string?> EnumerateParentDllDirectories(string baseDirectory)
+        {
+            DirectoryInfo? current = null;
+
+            try
+            {
+                current = new DirectoryInfo(baseDirectory);
+            }
+            catch
+            {
+                yield break;
+            }
+
+            while (current != null)
+            {
+                string? candidate = null;
+
+                try
+                {
+                    candidate = Path.Combine(current.FullName, "DLL");
+                }
+                catch
+                {
+                    candidate = null;
+                }
+
+                if (!string.IsNullOrWhiteSpace(candidate))
+                {
+                    yield return candidate;
+                }
+
+                current = current.Parent;
             }
         }
         /// <summary>
