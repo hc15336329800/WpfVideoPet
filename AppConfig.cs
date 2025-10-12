@@ -16,6 +16,7 @@ namespace WpfVideoPet
 
         public MqttConfig Mqtt { get; } = new();
         public AudioDuckingConfig AudioDucking { get; } = new();
+        public WakeConfig Wake { get; } = new();
         public ModbusConfig Modbus { get; } = new();
 
         public bool IsOperator => string.Equals(Role, "operator", StringComparison.OrdinalIgnoreCase);
@@ -159,6 +160,18 @@ namespace WpfVideoPet
                             if (duckingElement.TryGetProperty("restoreDelaySeconds", out var restoreDelayElement) && restoreDelayElement.TryGetInt32(out var restoreDelaySeconds))
                             {
                                 ducking.RestoreDelaySeconds = Math.Max(0, restoreDelaySeconds);
+                            }
+                        }
+                    }
+
+                    if (root.TryGetProperty("wake", out var wakeElement) && wakeElement.ValueKind == JsonValueKind.Object)
+                    {
+                        if (wakeElement.TryGetProperty("sdkDirectory", out var sdkElement))
+                        {
+                            var value = sdkElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                config.Wake.SdkDirectory = value.Trim();
                             }
                         }
                     }
@@ -472,7 +485,16 @@ public sealed class AudioDuckingConfig
     /// <summary>
     /// 在恢复正常音量前的等待秒数，允许 0 表示立即恢复。
     /// </summary>
-    public int RestoreDelaySeconds { get; set; } = 5;
+    public int RestoreDelaySeconds { get; set; } = 3;
 
     public TimeSpan RestoreDelay => TimeSpan.FromSeconds(Math.Max(0, RestoreDelaySeconds));
+}
+
+public sealed class WakeConfig
+{
+    /// <summary>
+    /// 可选的 Aikit SDK 源目录，支持包含中文及空格路径。
+    /// 若指定，将在运行时自动复制缺失的原生文件到程序目录。
+    /// </summary>
+    public string? SdkDirectory { get; set; }
 }

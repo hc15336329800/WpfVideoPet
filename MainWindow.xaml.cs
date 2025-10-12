@@ -111,7 +111,7 @@ namespace WpfVideoPet
             InitializeSpeechRecognition();
             InitializeMqttService();
             InitializeModbusMonitoring();
-            _wakeService = new AikitWakeService();
+            _wakeService = new AikitWakeService(_appConfig.Wake.SdkDirectory);
             InitializeWakeService();
         }
 
