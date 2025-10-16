@@ -30,7 +30,10 @@ namespace WpfVideoPet
         private SpeechRecognitionEngine? _speechRecognizer;
         private const double WakeWordConfidenceThreshold = 0.45;
         private readonly DispatcherTimer _volumeRestoreTimer;
-        private bool _suppressSliderCallback;
+        /// <summary>
+        /// 控制语音识别区域自动收起的定时器。
+        /// </summary>
+        private readonly DispatcherTimer _transcriptionResetTimer; private bool _suppressSliderCallback;
         private bool _isDuckingAudio;
         private int _userPreferredVolume;
         private readonly AppConfig _appConfig;
@@ -119,6 +122,12 @@ namespace WpfVideoPet
                 Interval = _audioDuckingConfig.RestoreDelay
             };
             _volumeRestoreTimer.Tick += (_, __) => RestorePlayerVolume();
+
+            _transcriptionResetTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+            _transcriptionResetTimer.Tick += (_, __) => ResetTranscriptionDisplay();
 
             InitializeSpeechRecognition();
             InitializeMqttService();
@@ -367,6 +376,7 @@ namespace WpfVideoPet
             }
 
             _volumeRestoreTimer.Stop();
+            _transcriptionResetTimer.Stop();
         }
 
         // 说明：此方法在你的构造函数事件绑定中被频繁调用，确保存在
@@ -1371,7 +1381,7 @@ namespace WpfVideoPet
         }
 
         /// <summary>
-        /// 启动语音播报服务执行一次语音识别任务，并处理生命周期控制。
+        /// 启动一次语音识别任务，若存在历史任务则先取消后重启。
         /// </summary>
         private void StartSpeechRecognitionWorkflow()
         {
@@ -1382,17 +1392,41 @@ namespace WpfVideoPet
             }
 
             CancellationTokenSource localCts;
+            CancellationTokenSource? previousCts = null;
             lock (_speechRecognitionStateLock)
             {
                 if (_speechRecognitionCts != null)
                 {
-                    AppLogger.Warn("检测到已有语音识别任务正在进行，本次请求忽略。");
-                    return;
+                    AppLogger.Warn("检测到已有语音识别任务正在进行，将取消后重新启动新的识别流程。");
+                    previousCts = _speechRecognitionCts;
                 }
 
                 _speechRecognitionCts = new CancellationTokenSource();
                 localCts = _speechRecognitionCts;
             }
+
+            if (previousCts != null)
+            {
+                AppLogger.Info("开始取消上一轮语音识别任务，确保新的任务可以顺利启动。");
+                try
+                {
+                    previousCts.Cancel();
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, $"取消历史语音识别任务时发生异常: {ex.Message}");
+                }
+                finally
+                {
+                    previousCts.Dispose();
+                }
+            }
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                _transcriptionResetTimer.Stop();
+                AppLogger.Info("已重置语音识别界面隐藏定时器，准备展示最新状态。");
+            }));
 
             UpdateTranscriptionDisplay("语音识别中...", "正在倾听，请稍候。");
 
@@ -1405,6 +1439,7 @@ namespace WpfVideoPet
                     if (string.IsNullOrWhiteSpace(result))
                     {
                         UpdateTranscriptionDisplay("识别结束", "未识别到有效语音内容。");
+                        ScheduleTranscriptionReset();
                     }
                 }
                 catch (OperationCanceledException)
@@ -1420,8 +1455,11 @@ namespace WpfVideoPet
                 {
                     lock (_speechRecognitionStateLock)
                     {
-                        _speechRecognitionCts?.Dispose();
-                        _speechRecognitionCts = null;
+                        if (ReferenceEquals(_speechRecognitionCts, localCts))
+                        {
+                            _speechRecognitionCts?.Dispose();
+                            _speechRecognitionCts = null;
+                        }
                     }
                 }
             });
@@ -1436,6 +1474,11 @@ namespace WpfVideoPet
             {
                 return;
             }
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                _transcriptionResetTimer.Stop();
+            }));
 
             UpdateTranscriptionDisplay("语音识别中...", text);
         }
@@ -1453,6 +1496,8 @@ namespace WpfVideoPet
             {
                 UpdateTranscriptionDisplay("识别结果", text);
             }
+
+            ScheduleTranscriptionReset();
         }
 
         /// <summary>
@@ -1462,8 +1507,8 @@ namespace WpfVideoPet
         {
             var content = string.IsNullOrWhiteSpace(message) ? "语音识别失败，请稍后重试。" : message;
             UpdateTranscriptionDisplay("识别失败", content);
+            ScheduleTranscriptionReset();
         }
-
         /// <summary>
         /// 将语音识别文案同步到界面层，自动切换到 UI 线程。
         /// </summary>
@@ -1575,6 +1620,7 @@ namespace WpfVideoPet
                         }
                     }
                 }
+
                 catch (OperationCanceledException)
                 {
                     break;
@@ -1607,5 +1653,40 @@ namespace WpfVideoPet
 
             AppLogger.Info("Modbus 继电器监听循环已结束。");
         }
+
+
+
+        /// <summary>
+        /// 调度隐藏语音识别界面，避免旧内容在下一次唤醒前残留。
+        /// </summary>
+        /// <param name="delay">自定义延迟，默认为 1 秒。</param>
+        private void ScheduleTranscriptionReset(TimeSpan? delay = null)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var actualDelay = delay ?? TimeSpan.FromSeconds(1);
+                _transcriptionResetTimer.Stop();
+                _transcriptionResetTimer.Interval = actualDelay;
+                _transcriptionResetTimer.Start();
+                AppLogger.Info($"已计划在 {actualDelay.TotalMilliseconds} ms 后隐藏语音识别界面。");
+            }));
+        }
+
+        /// <summary>
+        /// 隐藏语音识别界面并记录日志。
+        /// </summary>
+        private void ResetTranscriptionDisplay()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(ResetTranscriptionDisplay));
+                return;
+            }
+
+            _transcriptionResetTimer.Stop();
+            _overlay?.HideTranscription();
+            AppLogger.Info("语音识别界面已隐藏，等待下一次唤醒触发。");
+        }
+
     }
 }

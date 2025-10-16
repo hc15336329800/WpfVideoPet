@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace WpfVideoPet
 {
@@ -315,9 +316,25 @@ namespace WpfVideoPet
                             AppLogger.Info("触发“小黄小黄”业务逻辑：例如播报天气或执行定制命令。");
                             notificationMessage = "已唤醒“小黄小黄”，即将为您播报定制内容。";
 
-                            //开始语音转写
-                            AppLogger.Info("准备触发语音识别播报流程。");
-                            SpeechRecognitionRequested?.Invoke(this, EventArgs.Empty);
+                            // 播放默认提示音反馈用户操作，再延迟一秒启动语音转写。
+                            AppLogger.Info("播放默认唤醒提示音，告知用户已成功唤醒。");
+                            PlayDing();
+
+                            AppLogger.Info("已播放提示音，将在 1 秒后触发语音识别流程。");
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                                    AppLogger.Info("提示音播放延迟结束，开始通知主线程执行语音识别。");
+                                    SpeechRecognitionRequested?.Invoke(this, EventArgs.Empty);
+                                }
+                                catch (Exception ex)
+                                {
+                                    AppLogger.Error(ex, $"调度语音识别时发生异常: {ex.Message}");
+                                }
+                            });
+
                             AppLogger.Info("“小黄小黄”指令仅执行语音识别流程，将显式阻断视频通话逻辑。");
                             WakeKeywordRecognized?.Invoke(this, new WakeKeywordEventArgs(recognizedKeyword, notificationMessage));
                             AppLogger.Info("“小黄小黄”业务处理完毕，本次唤醒流程结束。");
