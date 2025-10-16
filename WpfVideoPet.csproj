@@ -27,6 +27,58 @@
 	  <Page Remove="DLL - 复制\**" />
 	  <Page Remove="doc\**" />
 	</ItemGroup>
+	<ItemGroup>
+	  <Content Include="Xfyun.tingxie\.vs\xunfei.yuyin.test.slnx\v18\DocumentLayout.backup.json" />
+	  <Content Include="Xfyun.tingxie\.vs\xunfei.yuyin.test.slnx\v18\DocumentLayout.json" />
+	</ItemGroup>
+	<ItemGroup>
+	  <None Include="Xfyun.tingxie\.git\COMMIT_EDITMSG" />
+	  <None Include="Xfyun.tingxie\.git\config" />
+	  <None Include="Xfyun.tingxie\.git\description" />
+	  <None Include="Xfyun.tingxie\.git\HEAD" />
+	  <None Include="Xfyun.tingxie\.git\hooks\applypatch-msg.sample" />
+	  <None Include="Xfyun.tingxie\.git\hooks\commit-msg.sample" />
+	  <None Include="Xfyun.tingxie\.git\hooks\fsmonitor-watchman.sample" />
+	  <None Include="Xfyun.tingxie\.git\hooks\post-update.sample" />
+	  <None Include="Xfyun.tingxie\.git\hooks\pre-applypatch.sample" />
+	  <None Include="Xfyun.tingxie\.git\hooks\pre-commit.sample" />
+	  <None Include="Xfyun.tingxie\.git\hooks\pre-merge-commit.sample" />
+	  <None Include="Xfyun.tingxie\.git\hooks\pre-push.sample" />
+	  <None Include="Xfyun.tingxie\.git\hooks\pre-rebase.sample" />
+	  <None Include="Xfyun.tingxie\.git\hooks\pre-receive.sample" />
+	  <None Include="Xfyun.tingxie\.git\hooks\prepare-commit-msg.sample" />
+	  <None Include="Xfyun.tingxie\.git\hooks\push-to-checkout.sample" />
+	  <None Include="Xfyun.tingxie\.git\hooks\update.sample" />
+	  <None Include="Xfyun.tingxie\.git\index" />
+	  <None Include="Xfyun.tingxie\.git\info\exclude" />
+	  <None Include="Xfyun.tingxie\.git\logs\HEAD" />
+	  <None Include="Xfyun.tingxie\.git\logs\refs\heads\main" />
+	  <None Include="Xfyun.tingxie\.git\logs\refs\remotes\origin\HEAD" />
+	  <None Include="Xfyun.tingxie\.git\logs\refs\remotes\origin\main" />
+	  <None Include="Xfyun.tingxie\.git\objects\11\beabf3542e46e61bf4b18186d6e4ab998060a7" />
+	  <None Include="Xfyun.tingxie\.git\objects\40\4499ab9b79464a3b96c9cd6069d5f82216b2a3" />
+	  <None Include="Xfyun.tingxie\.git\objects\55\c4ce1fd3cc1508509707608f46ab678f8e208b" />
+	  <None Include="Xfyun.tingxie\.git\objects\bb\647f2e4d1167e9980c4946ed0a9666bed59166" />
+	  <None Include="Xfyun.tingxie\.git\objects\d2\b2371b4fad38ee47f99b16b49517989e3ccd34" />
+	  <None Include="Xfyun.tingxie\.git\objects\f4\b1102ac6822b88b7e21430d37f727119af4d04" />
+	  <None Include="Xfyun.tingxie\.git\objects\pack\pack-93db8e29e2fb8c90dd95064be28558daa1d00db7.idx" />
+	  <None Include="Xfyun.tingxie\.git\objects\pack\pack-93db8e29e2fb8c90dd95064be28558daa1d00db7.pack" />
+	  <None Include="Xfyun.tingxie\.git\packed-refs" />
+	  <None Include="Xfyun.tingxie\.git\refs\heads\main" />
+	  <None Include="Xfyun.tingxie\.git\refs\remotes\origin\HEAD" />
+	  <None Include="Xfyun.tingxie\.git\refs\remotes\origin\main" />
+	  <None Include="Xfyun.tingxie\.vs\ProjectEvaluation\xunfei.yuyin.test.metadata.v10.bin" />
+	  <None Include="Xfyun.tingxie\.vs\ProjectEvaluation\xunfei.yuyin.test.projects.v10.bin" />
+	  <None Include="Xfyun.tingxie\.vs\ProjectEvaluation\xunfei.yuyin.test.strings.v10.bin" />
+	  <None Include="Xfyun.tingxie\.vs\xunfei.yuyin.test.slnx\DesignTimeBuild\.dtbcache.v2" />
+	  <None Include="Xfyun.tingxie\.vs\xunfei.yuyin.test.slnx\FileContentIndex\2173573a-4c71-45d5-9953-d805d893fc8f.vsidx" />
+	  <None Include="Xfyun.tingxie\.vs\xunfei.yuyin.test.slnx\FileContentIndex\419691f3-b8e4-48fe-a9e3-6e25bb596425.vsidx" />
+	  <None Include="Xfyun.tingxie\.vs\xunfei.yuyin.test.slnx\FileContentIndex\610472d7-12f2-442e-a49a-30d343dc872b.vsidx" />
+	  <None Include="Xfyun.tingxie\.vs\xunfei.yuyin.test.slnx\FileContentIndex\9f3c892a-2864-4949-b5ae-266f45a54403.vsidx" />
+	  <None Include="Xfyun.tingxie\.vs\xunfei.yuyin.test.slnx\v18\.futdcache.v2" />
+	  <None Include="Xfyun.tingxie\xunfei.yuyin.test.csproj" />
+	  <None Include="Xfyun.tingxie\xunfei.yuyin.test.slnx" />
+	</ItemGroup>
 
  
 
@@ -51,6 +103,11 @@
 		<None Update="webrtcsettings.json">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="Xfyun.tingxie\.git\objects\info\" />
+	  <Folder Include="Xfyun.tingxie\.git\refs\tags\" />
 	</ItemGroup>
 
 	<Target Name="EnsureWpfVideoPetNotRunning" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT'">

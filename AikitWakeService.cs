@@ -288,10 +288,39 @@ namespace WpfVideoPet
                     AppLogger.Info($"唤醒回调原始数据: {value}");
                 }
 
+                // 标记是否识别到唤醒词以及是否需要触发视频通话，避免误触发。
+                var keywordRecognized = false;
+                var shouldTriggerVideoCall = false; // 是否需要弹出视频窗口，仅“打开视频”时为 true。
+
                 if (TryGetKeyword(value, out var keyword))
                 {
-                    AppLogger.Info($"检测到唤醒词：{keyword}");
-                    HandleWakeKeyword(keyword!);
+                    keywordRecognized = true;
+                    var recognizedKeyword = keyword!; // 唤醒回调解析出的标准化唤醒词。
+                    AppLogger.Info($"解析到唤醒词：{recognizedKeyword}");
+
+                    string? notificationMessage = null; // 用于传递给界面层的业务提示文案。
+
+                    switch (recognizedKeyword)
+                    {
+                        case "小白小白":
+                            AppLogger.Info("触发“小白小白”业务逻辑：例如启动语音助手或开启常用功能。");
+                            notificationMessage = "已唤醒“小白小白”，正在为您准备常用功能。";
+                            break;
+                        case "小黄小黄":
+                            AppLogger.Info("触发“小黄小黄”业务逻辑：例如播报天气或执行定制命令。");
+                            notificationMessage = "已唤醒“小黄小黄”，即将为您播报定制内容。";
+                            break;
+                        case "打开视频":
+                            AppLogger.Info("触发“打开视频”业务逻辑：准备唤起视频通话窗口。");
+                            notificationMessage = "已识别指令“打开视频”，正在为您建立视频通话。";
+                            shouldTriggerVideoCall = true;
+                            break;
+                        default:
+                            AppLogger.Info($"唤醒词 {recognizedKeyword} 未绑定特定逻辑，执行默认处理。");
+                            break;
+                    }
+
+                    WakeKeywordRecognized?.Invoke(this, new WakeKeywordEventArgs(recognizedKeyword, notificationMessage));
                 }
                 else
                 {
@@ -299,8 +328,23 @@ namespace WpfVideoPet
                     AppLogger.Info("请检查回调 JSON 是否包含 keyword 字段，确认 keyword.txt 为 UTF-8 且每行以分号结尾，并确保 AD_LoadKeywordFile/AD_SpecifyKeywordSet 参数一致。");
                 }
 
-                PlayDing();
-                WakeTriggered?.Invoke(this, EventArgs.Empty);
+                if (keywordRecognized)
+                {
+                    if (shouldTriggerVideoCall)
+                    {
+                        AppLogger.Info("当前唤醒指令需要打开视频通话，将播放提示音并弹出视频窗口。");
+                        PlayDing();
+                        WakeTriggered?.Invoke(this, EventArgs.Empty);
+                    }
+                    else
+                    {
+                        AppLogger.Info("本次唤醒词不需要打开视频通话，仅播放业务提示。");
+                    }
+                }
+                else
+                {
+                    AppLogger.Warn("未识别出唤醒词，本次唤醒将不会触发视频窗口。");
+                }
             }
             else
             {
@@ -369,12 +413,37 @@ namespace WpfVideoPet
             try
             {
                 using var document = JsonDocument.Parse(json);
-                if (document.RootElement.ValueKind == JsonValueKind.Object &&
-                    document.RootElement.TryGetProperty("keyword", out var keywordElement) &&
-                    keywordElement.ValueKind == JsonValueKind.String)
+                if (document.RootElement.ValueKind == JsonValueKind.Object)
                 {
-                    keyword = keywordElement.GetString();
-                    return true;
+                    if (document.RootElement.TryGetProperty("keyword", out var keywordElement) &&
+                        keywordElement.ValueKind == JsonValueKind.String)
+                    {
+                        keyword = keywordElement.GetString();
+                        return true;
+                    }
+
+                    if (document.RootElement.TryGetProperty("rlt", out var resultElement))
+                    {
+                        if (resultElement.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var item in resultElement.EnumerateArray())
+                            {
+                                if (item.ValueKind == JsonValueKind.Object &&
+                                    item.TryGetProperty("keyword", out var itemKeyword) &&
+                                    itemKeyword.ValueKind == JsonValueKind.String)
+                                {
+                                    keyword = itemKeyword.GetString();
+                                    return true;
+                                }
+                            }
+
+                            warning = "唤醒回调 JSON 的 rlt 数组中未找到 keyword 字段。";
+                            return false;
+                        }
+
+                        warning = "唤醒回调 JSON 的 rlt 字段类型异常，期望数组。";
+                        return false;
+                    }
                 }
 
                 warning = "唤醒回调 JSON 中未找到 keyword 字段。";
@@ -386,7 +455,6 @@ namespace WpfVideoPet
                 return false;
             }
         }
-
         private static string? NormalizeKeyword(string? keyword)
         {
             if (string.IsNullOrWhiteSpace(keyword))
@@ -451,34 +519,7 @@ namespace WpfVideoPet
                 });
         }
 
-        /// <summary>
-        /// 根据唤醒词执行对应业务逻辑，可在此扩展自定义操作。
-        /// </summary>
-        /// <param name="keyword">成功解析到的唤醒词。</param>
-        private void HandleWakeKeyword(string keyword)
-        {
-            string? notification = null;
-
-            // 增加原始唤醒词日志，辅助定位未进入分支的情况。
-            AppLogger.Info($"准备执行唤醒词业务逻辑，原始内容: '{keyword}' (长度 {keyword.Length})。");
-
-            switch (keyword)
-            {
-                case "小白小白":
-                    AppLogger.Info("触发“小白小白”业务逻辑：例如启动语音助手或开启常用功能。");
-                    notification = "已唤醒“小白小白”，正在为您准备常用功能。";
-                    break;
-                case "小黄小黄":
-                    AppLogger.Info("触发“小黄小黄”业务逻辑：例如播报天气或执行定制命令。");
-                    notification = "已唤醒“小黄小黄”，即将为您播报定制内容。";
-                    break;
-                default:
-                    AppLogger.Info($"唤醒词 {keyword} 未绑定特定逻辑，执行默认处理。");
-                    break;
-            }
-
-            WakeKeywordRecognized?.Invoke(this, new WakeKeywordEventArgs(keyword, notification));
-        }
+         
 
         /// <summary>
         /// 播放提示音提示唤醒成功，若提示音文件不存在则尝试使用蜂鸣器。
