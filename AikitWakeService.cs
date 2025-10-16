@@ -109,6 +109,11 @@ namespace WpfVideoPet
         public event EventHandler<WakeKeywordEventArgs>? WakeKeywordRecognized;
 
         /// <summary>
+        /// 当业务需要启动语音识别播报时触发。
+        /// </summary>
+        public event EventHandler? SpeechRecognitionRequested;
+
+        /// <summary>
         /// 将控制台程序中的初始化逻辑迁移到 WPF 常驻服务。
         /// </summary>
         /// <returns>启动成功返回 true。</returns>
@@ -309,6 +314,10 @@ namespace WpfVideoPet
                         case "小黄小黄":
                             AppLogger.Info("触发“小黄小黄”业务逻辑：例如播报天气或执行定制命令。");
                             notificationMessage = "已唤醒“小黄小黄”，即将为您播报定制内容。";
+
+                            //开始语音转写
+                            AppLogger.Info("准备触发语音识别播报流程。");
+                            SpeechRecognitionRequested?.Invoke(this, EventArgs.Empty);
                             break;
                         case "打开视频":
                             AppLogger.Info("触发“打开视频”业务逻辑：准备唤起视频通话窗口。");

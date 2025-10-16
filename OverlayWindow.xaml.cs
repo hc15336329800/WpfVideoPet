@@ -64,11 +64,36 @@ namespace WpfVideoPet
             _notificationTimer.Start();
         }
 
+
         public void HideNotification()
         {
             _notificationTimer.Stop();
             NotificationBorder.Visibility = Visibility.Collapsed;
             TxtNotification.Text = string.Empty;
+        }
+
+        /// <summary>
+        /// 在叠加层上展示语音识别状态或结果。
+        /// </summary>
+        /// <param name="title">状态标题，如“识别中”或“识别结果”。</param>
+        /// <param name="content">识别文本内容。</param>
+        public void ShowTranscription(string title, string content)
+        {
+            TxtTranscriptionTitle.Text = string.IsNullOrWhiteSpace(title) ? "语音识别" : title.Trim();
+            TxtTranscriptionContent.Text = content?.Trim() ?? string.Empty;
+            TranscriptionBorder.Visibility = string.IsNullOrWhiteSpace(TxtTranscriptionContent.Text)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        }
+
+        /// <summary>
+        /// 隐藏语音识别区域并清空文案。
+        /// </summary>
+        public void HideTranscription()
+        {
+            TranscriptionBorder.Visibility = Visibility.Collapsed;
+            TxtTranscriptionTitle.Text = "语音识别";
+            TxtTranscriptionContent.Text = string.Empty;
         }
 
         protected override void OnClosed(EventArgs e)

@@ -46,6 +46,18 @@ namespace WpfVideoPet
         private CancellationTokenSource? _modbusCts;
         private Task? _modbusMonitorTask;
         private readonly AikitWakeService _wakeService;
+        /// <summary>
+        /// 语音播报服务实例，用于进行实时转写。
+        /// </summary>
+        private readonly AikitBobaoService? _bobaoService;
+        /// <summary>
+        /// 控制语音识别任务状态的锁对象。
+        /// </summary>
+        private readonly object _speechRecognitionStateLock = new();
+        /// <summary>
+        /// 当前语音识别任务对应的取消标记。
+        /// </summary>
+        private CancellationTokenSource? _speechRecognitionCts;
 
         public MainWindow()
         {
@@ -111,9 +123,16 @@ namespace WpfVideoPet
             InitializeSpeechRecognition();
             InitializeMqttService();
             InitializeModbusMonitoring();
+            _bobaoService = BuildBobaoService(startupDirectory);
+            if (_bobaoService == null)
+            {
+                AppLogger.Warn("语音播报服务未初始化，后续语音转写功能将不可用。");
+            }
+
             _wakeService = new AikitWakeService(_appConfig.Wake.SdkDirectory);
             InitializeWakeService();
         }
+
 
         private void OnMainWindowLoaded(object sender, RoutedEventArgs e)
         {
@@ -1198,7 +1217,21 @@ namespace WpfVideoPet
 
             _wakeService.WakeTriggered -= OnWakeTriggered;
             _wakeService.WakeKeywordRecognized -= OnWakeKeywordRecognized;
+            _wakeService.SpeechRecognitionRequested -= OnSpeechRecognitionRequested;
             _wakeService.Dispose();
+
+            if (_bobaoService != null)
+            {
+                _bobaoService.InterimResultReceived -= OnBobaoInterimResult;
+                _bobaoService.RecognitionCompleted -= OnBobaoRecognitionCompleted;
+                _bobaoService.RecognitionFailed -= OnBobaoRecognitionFailed;
+                lock (_speechRecognitionStateLock)
+                {
+                    _speechRecognitionCts?.Cancel();
+                }
+
+                _bobaoService.Dispose();
+            }
 
             if (_mqttService != null)
             {
@@ -1262,10 +1295,36 @@ namespace WpfVideoPet
         {
             _wakeService.WakeTriggered += OnWakeTriggered;
             _wakeService.WakeKeywordRecognized += OnWakeKeywordRecognized;
+            _wakeService.SpeechRecognitionRequested += OnSpeechRecognitionRequested;
 
             if (!_wakeService.Start())
             {
                 AppLogger.Warn("Aikit 唤醒服务未能成功启动，语音唤醒将不可用。");
+            }
+        }
+
+        /// <summary>
+        /// 构建语音播报服务并挂载事件，失败时返回 null。
+        /// </summary>
+        /// <param name="baseDirectory">应用根目录，用于定位配置文件。</param>
+        /// <returns>初始化完成的服务实例或 null。</returns>
+        private AikitBobaoService? BuildBobaoService(string baseDirectory)
+        {
+            try
+            {
+                var configPath = Path.Combine(baseDirectory, "aikitbobao.appsettings.json");
+                var settings = AikitBobaoSettings.Load(configPath);
+                var service = new AikitBobaoService(settings);
+                service.InterimResultReceived += OnBobaoInterimResult;
+                service.RecognitionCompleted += OnBobaoRecognitionCompleted;
+                service.RecognitionFailed += OnBobaoRecognitionFailed;
+                AppLogger.Info("讯飞播报服务初始化完成，已准备好语音转写能力。");
+                return service;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, $"初始化讯飞播报服务失败: {ex.Message}");
+                return null;
             }
         }
 
@@ -1302,6 +1361,134 @@ namespace WpfVideoPet
             }
         }
 
+        /// <summary>
+        /// 唤醒服务请求启动语音识别时的回调。
+        /// </summary>
+        private void OnSpeechRecognitionRequested(object? sender, EventArgs e)
+        {
+            AppLogger.Info("收到唤醒服务的语音识别请求，开始调度播报服务。");
+            StartSpeechRecognitionWorkflow();
+        }
+
+        /// <summary>
+        /// 启动语音播报服务执行一次语音识别任务，并处理生命周期控制。
+        /// </summary>
+        private void StartSpeechRecognitionWorkflow()
+        {
+            if (_bobaoService == null)
+            {
+                AppLogger.Warn("语音播报服务不可用，无法执行语音识别任务。");
+                return;
+            }
+
+            CancellationTokenSource localCts;
+            lock (_speechRecognitionStateLock)
+            {
+                if (_speechRecognitionCts != null)
+                {
+                    AppLogger.Warn("检测到已有语音识别任务正在进行，本次请求忽略。");
+                    return;
+                }
+
+                _speechRecognitionCts = new CancellationTokenSource();
+                localCts = _speechRecognitionCts;
+            }
+
+            UpdateTranscriptionDisplay("语音识别中...", "正在倾听，请稍候。");
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    AppLogger.Info("开始调用讯飞播报服务进行实时语音识别。");
+                    var result = await _bobaoService.TranscribeOnceAsync(localCts.Token).ConfigureAwait(false);
+                    if (string.IsNullOrWhiteSpace(result))
+                    {
+                        UpdateTranscriptionDisplay("识别结束", "未识别到有效语音内容。");
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    AppLogger.Warn("语音识别任务在完成前被取消。");
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, $"语音识别流程执行异常: {ex.Message}");
+                    UpdateTranscriptionDisplay("识别失败", $"发生异常: {ex.Message}");
+                }
+                finally
+                {
+                    lock (_speechRecognitionStateLock)
+                    {
+                        _speechRecognitionCts?.Dispose();
+                        _speechRecognitionCts = null;
+                    }
+                }
+            });
+        }
+
+        /// <summary>
+        /// 播报服务推送中间结果时更新界面。
+        /// </summary>
+        private void OnBobaoInterimResult(object? sender, string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+
+            UpdateTranscriptionDisplay("语音识别中...", text);
+        }
+
+        /// <summary>
+        /// 播报服务完成识别后展示最终结果。
+        /// </summary>
+        private void OnBobaoRecognitionCompleted(object? sender, string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                UpdateTranscriptionDisplay("识别结束", "未识别到有效语音内容。");
+            }
+            else
+            {
+                UpdateTranscriptionDisplay("识别结果", text);
+            }
+        }
+
+        /// <summary>
+        /// 播报服务发生异常时通知用户。
+        /// </summary>
+        private void OnBobaoRecognitionFailed(object? sender, string message)
+        {
+            var content = string.IsNullOrWhiteSpace(message) ? "语音识别失败，请稍后重试。" : message;
+            UpdateTranscriptionDisplay("识别失败", content);
+        }
+
+        /// <summary>
+        /// 将语音识别文案同步到界面层，自动切换到 UI 线程。
+        /// </summary>
+        /// <param name="title">标题文本。</param>
+        /// <param name="content">正文内容。</param>
+        private void UpdateTranscriptionDisplay(string title, string content)
+        {
+            void Update()
+            {
+                if (_overlay != null)
+                {
+                    _overlay.ShowTranscription(title, content);
+                }
+            }
+
+            if (Dispatcher.CheckAccess())
+            {
+                Update();
+            }
+            else
+            {
+                Dispatcher.BeginInvoke((Action)Update);
+            }
+        }
+ 
         private void OnWakeTriggered(object? sender, EventArgs e)
         {
             Dispatcher.BeginInvoke(new Action(ShowVideoCallWindow));

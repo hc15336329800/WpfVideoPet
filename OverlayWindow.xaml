@@ -82,5 +82,29 @@
                 </Grid>
             </Viewbox>
         </Border>
+
+        <Border x:Name="TranscriptionBorder"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Bottom"
+                Margin="16"
+                Padding="12"
+                CornerRadius="6"
+                Background="#CC1E1E1E"
+                Visibility="Collapsed">
+            <StackPanel>
+                <TextBlock x:Name="TxtTranscriptionTitle"
+                           Foreground="White"
+                           FontSize="16"
+                           FontWeight="SemiBold"
+                           Text="语音识别"/>
+                <TextBlock x:Name="TxtTranscriptionContent"
+                           Margin="0,6,0,0"
+                           Foreground="White"
+                           FontSize="14"
+                           TextWrapping="Wrap"
+                           Text=""/>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>
+ 

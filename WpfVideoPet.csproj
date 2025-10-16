@@ -47,11 +47,15 @@
 		<Reference Include="System.Speech" />
 	</ItemGroup>
 
-	<ItemGroup>
-		<None Update="webrtcsettings.json">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</None>
-	</ItemGroup>
+        <ItemGroup>
+                <None Update="webrtcsettings.json">
+                        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+                </None>
+                <None Update="aikitbobao.appsettings.json">
+                        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+                </None>
+        </ItemGroup>
+
 
 	<Target Name="EnsureWpfVideoPetNotRunning" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
 		<Exec Command="taskkill /F /IM WpfVideoPet.exe" ContinueOnError="true" />
