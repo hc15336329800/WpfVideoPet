@@ -7,19 +7,28 @@ using System.Windows.Threading;
 
 namespace WpfVideoPet
 {
+    /// <summary>
+    /// 负责在主界面上叠加提示信息、天气信息和语音识别状态的窗体。
+    /// </summary>
     public partial class OverlayWindow : Window
     {
+        /// <summary>
+        /// 默认的通知展示时长，满足“输出文字 2 秒后自动消失”的需求。
+        /// </summary>
+        public static readonly TimeSpan DefaultNotificationDuration = TimeSpan.FromSeconds(2);
+
         private const int GwlExstyle = -20;
         private const int WsExTransparent = 0x20;
         private const int WsExNoActivate = 0x8000000;
-        private readonly DispatcherTimer _notificationTimer;
+        private readonly DispatcherTimer _notificationTimer; // 控制通知自动隐藏的调度器。
+        private DateTime? _notificationExpiresAtUtc; // 记录当前通知预计结束时间，避免旧定时器误删新通知。
 
         public OverlayWindow()
         {
             InitializeComponent();
             _notificationTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(5)
+                Interval = DefaultNotificationDuration
             };
             _notificationTimer.Tick += NotificationTimerOnTick;
         }
@@ -52,13 +61,23 @@ namespace WpfVideoPet
         {
             if (string.IsNullOrWhiteSpace(message))
             {
+                AppLogger.Info("收到空通知内容，忽略展示请求。");
                 return;
             }
 
             TxtNotification.Text = message.Trim();
             NotificationBorder.Visibility = Visibility.Visible;
 
-            var interval = duration ?? TimeSpan.FromSeconds(5);
+            var interval = duration ?? DefaultNotificationDuration;
+            if (interval <= TimeSpan.Zero)
+            {
+                AppLogger.Warn($"通知展示时长 {interval} 无效，回退至默认值 {DefaultNotificationDuration}。");
+                interval = DefaultNotificationDuration;
+            }
+
+            _notificationExpiresAtUtc = DateTime.UtcNow.Add(interval);
+            AppLogger.Info($"叠加层通知更新，内容：{TxtNotification.Text}，计划在 {interval.TotalSeconds:F1} 秒后隐藏。");
+
             _notificationTimer.Stop();
             _notificationTimer.Interval = interval;
             _notificationTimer.Start();
@@ -70,6 +89,8 @@ namespace WpfVideoPet
             _notificationTimer.Stop();
             NotificationBorder.Visibility = Visibility.Collapsed;
             TxtNotification.Text = string.Empty;
+            _notificationExpiresAtUtc = null;
+            AppLogger.Info("叠加层通知已隐藏并清空文案。");
         }
 
         /// <summary>
@@ -105,6 +126,13 @@ namespace WpfVideoPet
 
         private void NotificationTimerOnTick(object? sender, EventArgs e)
         {
+            if (_notificationExpiresAtUtc.HasValue && DateTime.UtcNow < _notificationExpiresAtUtc.Value)
+            {
+                AppLogger.Info("检测到仍在展示期的通知，忽略本次自动隐藏信号。");
+                return;
+            }
+
+            AppLogger.Info("通知展示时长已到，自动收起叠加层通知。");
             HideNotification();
         }
 

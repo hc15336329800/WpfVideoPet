@@ -325,7 +325,8 @@ namespace WpfVideoPet
                             {
                                 try
                                 {
-                                    await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                                    // 设置延迟 0.5 秒启动语音转写
+                                    await Task.Delay(TimeSpan.FromSeconds(0.5)).ConfigureAwait(false);
                                     AppLogger.Info("提示音播放延迟结束，开始通知主线程执行语音识别。");
                                     SpeechRecognitionRequested?.Invoke(this, EventArgs.Empty);
                                 }
