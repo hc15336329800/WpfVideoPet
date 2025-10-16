@@ -25,7 +25,14 @@ namespace WpfVideoPet
         private bool _disposed;
         private bool _recognizing;
         private ClientWebSocket? _webSocket;
+        /// <summary>
+        /// 当前使用的麦克风采集实例。
+        /// </summary>
         private WaveInEvent? _waveIn;
+        /// <summary>
+        /// 标记麦克风是否处于录音状态，避免访问不存在的 RecordingState 属性。
+        /// </summary>
+        private bool _isRecording;
         private CancellationTokenSource? _internalCts;
         private Task? _receiveTask;
         private TaskCompletionSource<string?>? _resultSource;
@@ -89,8 +96,11 @@ namespace WpfVideoPet
                 _receiveTask = Task.Run(() => ReceiveLoopAsync(linkedCts.Token), CancellationToken.None);
 
                 _waveIn?.StartRecording();
-                AppLogger.Info("讯飞播报服务已开始录音，等待语音输入……");
-
+                if (_waveIn != null)
+                {
+                    _isRecording = true;
+                    AppLogger.Info("讯飞播报服务已开始录音，已更新录音状态标记。");
+                }
                 var result = await _resultSource.Task.ConfigureAwait(false);
 
                 return result;
@@ -153,11 +163,13 @@ namespace WpfVideoPet
         /// <param name="cancellationToken">用于响应外部取消的令牌。</param>
         private void SetupMicrophone(CancellationToken cancellationToken)
         {
+            _isRecording = false;
             _waveIn = new WaveInEvent
             {
                 WaveFormat = new WaveFormat(16000, 16, 1),
                 BufferMilliseconds = 20
             };
+            AppLogger.Info("麦克风采集器已创建，录音状态重置为未启动。");
 
             int status = StatusFirstFrame;
             int silenceMs = 0;
@@ -258,6 +270,8 @@ namespace WpfVideoPet
 
             _waveIn.RecordingStopped += async (_, _) =>
             {
+                _isRecording = false;
+                AppLogger.Info("麦克风录音已停止，状态标记已复位。");
                 if (!closing)
                 {
                     closing = true;
@@ -431,8 +445,12 @@ namespace WpfVideoPet
                 var frame = new { data = new { status = StatusLastFrame, format = "audio/L16;rate=16000", audio = string.Empty, encoding = "raw" } };
                 string json = JsonSerializer.Serialize(frame);
                 await _webSocket.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, CancellationToken.None).ConfigureAwait(false);
-                _waveIn?.StopRecording();
-                AppLogger.Info("已发送最后一帧并停止录音。");
+                if (_waveIn != null && _isRecording)
+                {
+                    _waveIn.StopRecording();
+                    _isRecording = false;
+                    AppLogger.Info("已发送最后一帧并停止录音，触发主动停止流程。");
+                }
             }
             catch (Exception ex)
             {
@@ -448,9 +466,11 @@ namespace WpfVideoPet
             try
             {
                 _internalCts?.Cancel();
-                if (_waveIn != null && _waveIn.RecordingState == RecordingState.Recording)
+                if (_waveIn != null && _isRecording)
                 {
                     _waveIn.StopRecording();
+                    _isRecording = false;
+                    AppLogger.Info("异常终止时检测到仍在录音，已主动停止麦克风。");
                 }
                 if (_webSocket != null && _webSocket.State == WebSocketState.Open)
                 {
@@ -482,9 +502,17 @@ namespace WpfVideoPet
                     }
                 }
 
-                _waveIn?.StopRecording();
-                _waveIn?.Dispose();
-                _waveIn = null;
+                if (_waveIn != null && _isRecording)
+                {
+                    _waveIn.StopRecording();
+                    AppLogger.Info("清理阶段检测到录音仍在进行，已停止麦克风。");
+                }
+                if (_waveIn != null)
+                {
+                    _waveIn.Dispose();
+                    _waveIn = null;
+                }
+                _isRecording = false;
 
                 if (_webSocket != null)
                 {
