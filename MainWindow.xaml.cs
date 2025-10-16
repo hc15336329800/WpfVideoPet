@@ -31,9 +31,17 @@ namespace WpfVideoPet
         private const double WakeWordConfidenceThreshold = 0.45;
         private readonly DispatcherTimer _volumeRestoreTimer;
         /// <summary>
-        /// 控制语音识别区域自动收起的定时器。
+        /// 控制语音识别提示自动隐藏的计时器，避免识别文本长时间停留。
         /// </summary>
-        private readonly DispatcherTimer _transcriptionResetTimer; private bool _suppressSliderCallback;
+        private readonly DispatcherTimer _transcriptionResetTimer;
+        /// <summary>
+        /// 标记程序是否在内部更新音量滑块，防止重复触发事件。
+        /// </summary>
+        private bool _suppressSliderCallback;
+        /// <summary>
+        /// 语音识别区域在最后一次更新后保持展示的时长。
+        /// </summary>
+        private static readonly TimeSpan TranscriptionAutoHideDelay = TimeSpan.FromSeconds(2);
         private bool _isDuckingAudio;
         private int _userPreferredVolume;
         private readonly AppConfig _appConfig;
@@ -122,7 +130,7 @@ namespace WpfVideoPet
 
             _transcriptionResetTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(1)
+                Interval = TranscriptionAutoHideDelay
             };
             _transcriptionResetTimer.Tick += (_, __) => ResetTranscriptionDisplay();
 
@@ -1438,13 +1446,9 @@ namespace WpfVideoPet
                 return;
             }
 
-            Dispatcher.BeginInvoke(new Action(() =>
-            {
-                _transcriptionResetTimer.Stop();
-            }));
-
             UpdateTranscriptionDisplay("语音识别中...", text);
         }
+
 
         /// <summary>
         /// 播报服务完成识别后展示最终结果。
@@ -1459,9 +1463,8 @@ namespace WpfVideoPet
             {
                 UpdateTranscriptionDisplay("识别结果", text);
             }
-
-            ScheduleTranscriptionReset();
         }
+
 
         /// <summary>
         /// 播报服务发生异常时通知用户。
@@ -1470,8 +1473,8 @@ namespace WpfVideoPet
         {
             var content = string.IsNullOrWhiteSpace(message) ? "语音识别失败，请稍后重试。" : message;
             UpdateTranscriptionDisplay("识别失败", content);
-            ScheduleTranscriptionReset();
         }
+
         /// <summary>
         /// 将语音识别文案同步到界面层，自动切换到 UI 线程。
         /// </summary>
@@ -1483,7 +1486,9 @@ namespace WpfVideoPet
             {
                 if (_overlay != null)
                 {
+                    AppLogger.Info($"语音识别文案更新，标题: {title}，内容: {content}");
                     _overlay.ShowTranscription(title, content);
+                    ScheduleTranscriptionReset(TranscriptionAutoHideDelay);
                 }
             }
 
@@ -1496,7 +1501,8 @@ namespace WpfVideoPet
                 Dispatcher.BeginInvoke((Action)Update);
             }
         }
- 
+
+
         private void OnWakeTriggered(object? sender, EventArgs e)
         {
             Dispatcher.BeginInvoke(new Action(ShowVideoCallWindow));
@@ -1527,22 +1533,22 @@ namespace WpfVideoPet
             _videoCallWindow.Closed += (_, _) => _videoCallWindow = null;
             _videoCallWindow.Show();
         }
-         
+
 
         /// <summary>
         /// 调度隐藏语音识别界面，避免旧内容在下一次唤醒前残留。
         /// </summary>
-        /// <param name="delay">自定义延迟，默认为 1 秒。</param>
+        /// <param name="delay">自定义延迟，默认延迟为 2 秒。</param>
         private void ScheduleTranscriptionReset(TimeSpan? delay = null)
         {
             Dispatcher.BeginInvoke(new Action(() =>
             {
-                var actualDelay = delay ?? TimeSpan.FromSeconds(1);
-                _transcriptionResetTimer.Stop();
+                var actualDelay = delay ?? TranscriptionAutoHideDelay;
+            _transcriptionResetTimer.Stop();
                 _transcriptionResetTimer.Interval = actualDelay;
                 _transcriptionResetTimer.Start();
                 AppLogger.Info($"已计划在 {actualDelay.TotalMilliseconds} ms 后隐藏语音识别界面。");
-            }));
+        }));
         }
 
         /// <summary>
