@@ -295,7 +295,7 @@ namespace WpfVideoPet
 
                 // 标记是否识别到唤醒词以及是否需要触发视频通话，避免误触发。
                 var keywordRecognized = false;
-                var shouldTriggerVideoCall = false; // 是否需要弹出视频窗口，仅“打开视频”时为 true。
+                var shouldTriggerVideoCall = false; // 标记是否需要弹出视频窗口，仅当识别到“打开视频”时才允许触发。
 
                 if (TryGetKeyword(value, out var keyword))
                 {
@@ -318,7 +318,10 @@ namespace WpfVideoPet
                             //开始语音转写
                             AppLogger.Info("准备触发语音识别播报流程。");
                             SpeechRecognitionRequested?.Invoke(this, EventArgs.Empty);
-                            break;
+                            AppLogger.Info("“小黄小黄”指令仅执行语音识别流程，将显式阻断视频通话逻辑。");
+                            WakeKeywordRecognized?.Invoke(this, new WakeKeywordEventArgs(recognizedKeyword, notificationMessage));
+                            AppLogger.Info("“小黄小黄”业务处理完毕，本次唤醒流程结束。");
+                            return;
                         case "打开视频":
                             AppLogger.Info("触发“打开视频”业务逻辑：准备唤起视频通话窗口。");
                             notificationMessage = "已识别指令“打开视频”，正在为您建立视频通话。";
@@ -347,7 +350,7 @@ namespace WpfVideoPet
                     }
                     else
                     {
-                        AppLogger.Info("本次唤醒词不需要打开视频通话，仅播放业务提示。");
+                        AppLogger.Info("当前唤醒词不匹配“打开视频”指令，本次唤醒将不会弹出视频窗口。");
                     }
                 }
                 else
