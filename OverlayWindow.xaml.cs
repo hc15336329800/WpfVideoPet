@@ -1,9 +1,10 @@
 ﻿
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
-using System.Windows.Threading;
 
 namespace WpfVideoPet
 {
@@ -20,17 +21,12 @@ namespace WpfVideoPet
         private const int GwlExstyle = -20;
         private const int WsExTransparent = 0x20;
         private const int WsExNoActivate = 0x8000000;
-        private readonly DispatcherTimer _notificationTimer; // 控制通知自动隐藏的调度器。
-        private DateTime? _notificationExpiresAtUtc; // 记录当前通知预计结束时间，避免旧定时器误删新通知。
+        private CancellationTokenSource? _notificationCts; // 控制通知隐藏逻辑的取消令牌，确保并发通知不会互相干扰。
+
 
         public OverlayWindow()
         {
-            InitializeComponent();
-            _notificationTimer = new DispatcherTimer
-            {
-                Interval = DefaultNotificationDuration
-            };
-            _notificationTimer.Tick += NotificationTimerOnTick;
+            InitializeComponent();           
         }
 
         protected override void OnSourceInitialized(EventArgs e)
@@ -74,25 +70,67 @@ namespace WpfVideoPet
                 AppLogger.Warn($"通知展示时长 {interval} 无效，回退至默认值 {DefaultNotificationDuration}。");
                 interval = DefaultNotificationDuration;
             }
+            CancelPendingNotificationHide();
 
-            _notificationExpiresAtUtc = DateTime.UtcNow.Add(interval);
+            var cts = new CancellationTokenSource();
+            _notificationCts = cts;
+
             AppLogger.Info($"叠加层通知更新，内容：{TxtNotification.Text}，计划在 {interval.TotalSeconds:F1} 秒后隐藏。");
 
-            _notificationTimer.Stop();
-            _notificationTimer.Interval = interval;
-            _notificationTimer.Start();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(interval, cts.Token).ConfigureAwait(false);
+
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        if (!ReferenceEquals(_notificationCts, cts))
+                        {
+                            AppLogger.Info("检测到更新后的通知已经接管隐藏流程，本次定时任务忽略。");
+                            return;
+                        }
+
+                        AppLogger.Info("通知展示时长已到，由后台任务触发自动隐藏。");
+                        HideNotification();
+                    });
+                }
+                catch (TaskCanceledException)
+                {
+                    AppLogger.Info("通知隐藏任务已被取消，通常是新的通知到来或手动隐藏触发。");
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, $"执行通知隐藏任务时出现异常: {ex.Message}");
+                }
+                finally
+                {
+                    if (ReferenceEquals(_notificationCts, cts))
+                    {
+                        CancelPendingNotificationHide();
+                    }
+                    cts.Dispose();
+                }
+            });
         }
 
 
         public void HideNotification()
         {
-            _notificationTimer.Stop();
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(HideNotification);
+                return;
+            }
+
+            CancelPendingNotificationHide();
+
             NotificationBorder.Visibility = Visibility.Collapsed;
             TxtNotification.Text = string.Empty;
-            _notificationExpiresAtUtc = null;
             AppLogger.Info("叠加层通知已隐藏并清空文案。");
         }
-
+        
+  
         /// <summary>
         /// 在叠加层上展示语音识别状态或结果。
         /// </summary>
@@ -119,21 +157,27 @@ namespace WpfVideoPet
 
         protected override void OnClosed(EventArgs e)
         {
-            _notificationTimer.Stop();
-            _notificationTimer.Tick -= NotificationTimerOnTick;
             base.OnClosed(e);
         }
 
-        private void NotificationTimerOnTick(object? sender, EventArgs e)
+        /// <summary>
+        /// 取消已有的通知隐藏任务，确保新通知展示时不会被旧的定时任务误触发隐藏。
+        /// </summary>
+        private void CancelPendingNotificationHide()
         {
-            if (_notificationExpiresAtUtc.HasValue && DateTime.UtcNow < _notificationExpiresAtUtc.Value)
+            var previousCts = Interlocked.Exchange(ref _notificationCts, null);
+            if (previousCts == null)
             {
-                AppLogger.Info("检测到仍在展示期的通知，忽略本次自动隐藏信号。");
                 return;
             }
 
-            AppLogger.Info("通知展示时长已到，自动收起叠加层通知。");
-            HideNotification();
+            if (!previousCts.IsCancellationRequested)
+            {
+                previousCts.Cancel();
+            }
+
+            previousCts.Dispose();
+            AppLogger.Info("已取消历史通知隐藏任务，避免旧任务误删新通知。");
         }
 
         [DllImport("user32.dll")]
