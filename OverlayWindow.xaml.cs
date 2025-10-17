@@ -52,11 +52,17 @@ namespace WpfVideoPet
             CubeRotation.Angle = angle;
         }
 
-        public void ShowNotification(string message, TimeSpan? duration = null)
+        /// <summary>
+        /// 展示虚拟人通知气泡，同时根据需要动态设置标题与内容。
+        /// </summary>
+        /// <param name="message">通知正文内容。</param>
+        /// <param name="duration">展示时长，默认 2 秒。</param>
+        /// <param name="title">通知标题，默认“AI 助手”。</param>
+        public void ShowNotification(string message, TimeSpan? duration = null, string? title = null)
         {
             if (!Dispatcher.CheckAccess())
             {
-                Dispatcher.Invoke(() => ShowNotification(message, duration));
+                Dispatcher.Invoke(() => ShowNotification(message, duration, title));
                 return;
             }
 
@@ -66,6 +72,9 @@ namespace WpfVideoPet
                 return;
             }
 
+            TxtNotificationTitle.Text = string.IsNullOrWhiteSpace(title)
+                ? "AI 助手"
+                : title.Trim();
             TxtNotification.Text = message.Trim();
             NotificationBorder.Visibility = Visibility.Visible;
 
@@ -76,11 +85,10 @@ namespace WpfVideoPet
                 interval = DefaultNotificationDuration;
             }
 
-            AppLogger.Info($"叠加层通知更新，内容：{TxtNotification.Text}，计划在 {interval.TotalSeconds:F1} 秒后隐藏。");
+            AppLogger.Info($"叠加层通知更新，标题：{TxtNotificationTitle.Text}，内容：{TxtNotification.Text}，计划在 {interval.TotalSeconds:F1} 秒后隐藏。");
 
             PrepareNotificationTimer(interval);
         }
-
 
         public void HideNotification()
         {
@@ -94,32 +102,38 @@ namespace WpfVideoPet
 
             NotificationBorder.Visibility = Visibility.Collapsed;
             TxtNotification.Text = string.Empty;
+            TxtNotificationTitle.Text = "AI 助手";
             AppLogger.Info("叠加层通知已隐藏并清空文案。");
-        }
-        
-  
-        /// <summary>
-        /// 在叠加层上展示语音识别状态或结果。
-        /// </summary>
-        /// <param name="title">状态标题，如“识别中”或“识别结果”。</param>
-        /// <param name="content">识别文本内容。</param>
-        public void ShowTranscription(string title, string content)
-        {
-            TxtTranscriptionTitle.Text = string.IsNullOrWhiteSpace(title) ? "语音识别" : title.Trim();
-            TxtTranscriptionContent.Text = content?.Trim() ?? string.Empty;
-            TranscriptionBorder.Visibility = string.IsNullOrWhiteSpace(TxtTranscriptionContent.Text)
-                ? Visibility.Collapsed
-                : Visibility.Visible;
         }
 
         /// <summary>
-        /// 隐藏语音识别区域并清空文案。
+        /// 将语音识别内容映射到 3D 虚拟人左上角的通知气泡中展示。
+        /// </summary>
+        /// <param name="title">语音识别标题。</param>
+        /// <param name="content">语音识别文本内容。</param>
+        public void ShowTranscription(string title, string content)
+        {
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                AppLogger.Info("收到空的语音识别内容，触发通知隐藏逻辑。");
+                HideNotification();
+                return;
+            }
+
+            var resolvedTitle = string.IsNullOrWhiteSpace(title) ? "语音识别" : title.Trim();
+            var resolvedContent = content.Trim();
+            AppLogger.Info($"语音识别结果更新，将在虚拟人气泡展示。标题：{resolvedTitle}，内容：{resolvedContent}");
+
+            ShowNotification(resolvedContent, DefaultNotificationDuration, resolvedTitle);
+        }
+
+        /// <summary>
+        /// 语音识别交互结束时直接复用通知隐藏逻辑，收起虚拟人气泡。
         /// </summary>
         public void HideTranscription()
         {
-            TranscriptionBorder.Visibility = Visibility.Collapsed;
-            TxtTranscriptionTitle.Text = "语音识别";
-            TxtTranscriptionContent.Text = string.Empty;
+            AppLogger.Info("外部请求隐藏语音识别气泡，转为隐藏通知。");
+            HideNotification();
         }
 
         protected override void OnClosed(EventArgs e)

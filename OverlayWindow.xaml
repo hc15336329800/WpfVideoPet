@@ -10,7 +10,11 @@
         Topmost="True"
         ResizeMode="NoResize"
         Focusable="False">
+
+    <!-- Grid 主容器，禁止鼠标交互（悬浮展示层） -->
     <Grid IsHitTestVisible="False">
+
+        <!-- 🟦 左上角天气信息面板 -->
         <Border HorizontalAlignment="Left"
                 VerticalAlignment="Top"
                 Margin="16"
@@ -25,99 +29,91 @@
             </StackPanel>
         </Border>
 
+
+        <!-- 🟥 右下角 3D 模型区域（AI 虚拟人或宠物展示区） -->
         <Border HorizontalAlignment="Right"
                 VerticalAlignment="Bottom"
                 Margin="16"
                 Background="#00000000">
-            <!-- 右下角 3D 模型区域，叠加对话气泡以便 AI 虚拟人展示唤醒文案。 -->
-            <Grid Width="300" Height="240">
-                <Viewbox Width="260" Height="180"
-                         HorizontalAlignment="Right"
-                         VerticalAlignment="Bottom">
-                    <Grid>
-                        <h:HelixViewport3D x:Name="PetView"
-                                           ShowFrameRate="False"
-                                           ShowViewCube="False"
-                                           ZoomExtentsWhenLoaded="True"
-                                           Background="#00FFFFFF">
-                            <h:DefaultLights/>
-                            <ModelVisual3D>
-                                <ModelVisual3D.Content>
-                                    <Model3DGroup x:Name="PetModel">
-                                        <AmbientLight Color="#666666"/>
-                                        <DirectionalLight Color="White" Direction="-1,-1,-2"/>
-                                        <GeometryModel3D x:Name="Cube">
-                                            <GeometryModel3D.Geometry>
-                                                <MeshGeometry3D Positions="-0.5,-0.5,-0.5  0.5,-0.5,-0.5  0.5,0.5,-0.5 -0.5,0.5,-0.5 -0.5,-0.5,0.5  0.5,-0.5,0.5  0.5,0.5,0.5 -0.5,0.5,0.5"
-                                                                TriangleIndices="0 1 2 0 2 3  1 5 6 1 6 2  5 4 7 5 7 6  4 0 3 4 3 7  3 2 6 3 6 7  4 5 1 4 1 0" />
-                                            </GeometryModel3D.Geometry>
-                                            <GeometryModel3D.Material>
-                                                <DiffuseMaterial Brush="#FF01ADA8"/>
-                                            </GeometryModel3D.Material>
-                                            <GeometryModel3D.Transform>
-                                                <RotateTransform3D>
-                                                    <RotateTransform3D.Rotation>
-                                                        <AxisAngleRotation3D x:Name="CubeRotation" Axis="0,1,0" Angle="0"/>
-                                                    </RotateTransform3D.Rotation>
-                                                </RotateTransform3D>
-                                            </GeometryModel3D.Transform>
-                                        </GeometryModel3D>
-                                    </Model3DGroup>
-                                </ModelVisual3D.Content>
-                            </ModelVisual3D>
-                        </h:HelixViewport3D>
-                    </Grid>
-                </Viewbox>
+            <!-- 叠加层 Grid：同时容纳 3D 模型和对话气泡 -->
+            <Grid Width="300" Height="300">
 
-                <Border x:Name="NotificationBorder"
-                        HorizontalAlignment="Left"
-                        VerticalAlignment="Top"
-                        Margin="-32,-48,0,0"
-                        Padding="14,10,14,12"
-                        CornerRadius="10"
-                        Background="#F0333333"
-                        Visibility="Collapsed">
-                    <!-- 对话气泡正文区域，展示唤醒提示文本。 -->
-                    <StackPanel Orientation="Vertical" MaxWidth="240">
-                        <TextBlock Text="AI 助手"
-                                   Foreground="#FF8EE7FF"
-                                   FontSize="14"
-                                   FontWeight="Bold"
-                                   Margin="0,0,0,4"/>
-                        <TextBlock x:Name="TxtNotification"
-                                   Foreground="White"
-                                   FontSize="18"
-                                   FontWeight="SemiBold"
-                                   TextWrapping="Wrap"
-                                   TextAlignment="Left"
-                                   Text=""/>
-                    </StackPanel>
-                </Border>
+                <!-- 内层 Grid，用于放置 HelixToolkit 3D 模型视图 -->
+                <Grid HorizontalAlignment="Right"
+                      VerticalAlignment="Bottom"
+                      Width="300"
+                      Height="300">
+
+                    <!-- Viewbox 自动缩放 3D 内容至容器 -->
+                    <Viewbox Stretch="Fill"
+                             StretchDirection="Both">
+                        <Grid>
+
+                            <!-- HelixViewport3D：HelixToolkit 3D 渲染核心组件 -->
+                            <h:HelixViewport3D x:Name="PetView"
+                                               ShowFrameRate="False"
+                                               ShowViewCube="False"
+                                               ZoomExtentsWhenLoaded="True"
+                                               Background="#00FFFFFF">
+                                <h:DefaultLights/>
+
+                                <!-- 3D 模型容器 -->
+                                <ModelVisual3D>
+                                    <ModelVisual3D.Content>
+                                        <Model3DGroup x:Name="PetModel">
+                                            <AmbientLight Color="#666666"/>
+                                            <DirectionalLight Color="White" Direction="-1,-1,-2"/>
+                                            <GeometryModel3D x:Name="Cube">
+                                                <GeometryModel3D.Geometry>
+                                                    <MeshGeometry3D Positions="-0.5,-0.5,-0.5  0.5,-0.5,-0.5  0.5,0.5,-0.5 -0.5,0.5,-0.5 -0.5,-0.5,0.5  0.5,-0.5,0.5  0.5,0.5,0.5 -0.5,0.5,0.5"
+                                                                    TriangleIndices="0 1 2 0 2 3  1 5 6 1 6 2  5 4 7 5 7 6  4 0 3 4 3 7  3 2 6 3 6 7  4 5 1 4 1 0" />
+                                                </GeometryModel3D.Geometry>
+                                                <GeometryModel3D.Material>
+                                                    <DiffuseMaterial Brush="#FF01ADA8"/>
+                                                </GeometryModel3D.Material>
+                                                <GeometryModel3D.Transform>
+                                                    <RotateTransform3D>
+                                                        <RotateTransform3D.Rotation>
+                                                            <AxisAngleRotation3D x:Name="CubeRotation" Axis="0,1,0" Angle="0"/>
+                                                        </RotateTransform3D.Rotation>
+                                                    </RotateTransform3D>
+                                                </GeometryModel3D.Transform>
+                                            </GeometryModel3D>
+                                        </Model3DGroup>
+                                    </ModelVisual3D.Content>
+                                </ModelVisual3D>
+                            </h:HelixViewport3D>
+                        </Grid>
+                    </Viewbox>
+
+                    <!-- 💬 对话提示气泡区域 -->
+                    <Border x:Name="NotificationBorder"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            Margin="-12,-80,0,0"
+                            Padding="14,10,14,12"
+                            CornerRadius="10"
+                            Background="#F0333333"
+                            Visibility="Collapsed">
+                        <!-- 对话气泡正文区域，展示唤醒提示文本。 -->
+                        <StackPanel Orientation="Vertical" MaxWidth="240">
+                            <TextBlock x:Name="TxtNotificationTitle"
+                                       Text="AI 助手"
+                                       Foreground="#FF8EE7FF"
+                                       FontSize="14"
+                                       FontWeight="Bold"
+                                       Margin="0,0,0,4"/>
+                            <TextBlock x:Name="TxtNotification"
+                                       Foreground="White"
+                                       FontSize="18"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Left"
+                                       Text=""/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </Grid>
-        </Border>
-
-        <Border x:Name="TranscriptionBorder"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Bottom"
-                Margin="16"
-                Padding="12"
-                CornerRadius="6"
-                Background="#CC1E1E1E"
-                Visibility="Collapsed">
-            <StackPanel>
-                <TextBlock x:Name="TxtTranscriptionTitle"
-                           Foreground="White"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           Text="语音识别"/>
-                <TextBlock x:Name="TxtTranscriptionContent"
-                           Margin="0,6,0,0"
-                           Foreground="White"
-                           FontSize="14"
-                           TextWrapping="Wrap"
-                           Text=""/>
-            </StackPanel>
         </Border>
     </Grid>
 </Window>
- 
