@@ -1,10 +1,8 @@
-﻿
-using System;
+﻿using System;
 using System.Runtime.InteropServices;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Threading;
 
 namespace WpfVideoPet
 {
@@ -21,12 +19,13 @@ namespace WpfVideoPet
         private const int GwlExstyle = -20;
         private const int WsExTransparent = 0x20;
         private const int WsExNoActivate = 0x8000000;
-        private CancellationTokenSource? _notificationCts; // 控制通知隐藏逻辑的取消令牌，确保并发通知不会互相干扰。
+        private DispatcherTimer? _notificationTimer; // 负责调度通知隐藏的 UI 线程计时器，避免跨线程隐藏导致状态错乱。
 
 
         public OverlayWindow()
         {
-            InitializeComponent();           
+            InitializeComponent();
+            InitializeNotificationTimer();
         }
 
         protected override void OnSourceInitialized(EventArgs e)
@@ -55,6 +54,12 @@ namespace WpfVideoPet
 
         public void ShowNotification(string message, TimeSpan? duration = null)
         {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => ShowNotification(message, duration));
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(message))
             {
                 AppLogger.Info("收到空通知内容，忽略展示请求。");
@@ -70,48 +75,10 @@ namespace WpfVideoPet
                 AppLogger.Warn($"通知展示时长 {interval} 无效，回退至默认值 {DefaultNotificationDuration}。");
                 interval = DefaultNotificationDuration;
             }
-            CancelPendingNotificationHide();
-
-            var cts = new CancellationTokenSource();
-            _notificationCts = cts;
 
             AppLogger.Info($"叠加层通知更新，内容：{TxtNotification.Text}，计划在 {interval.TotalSeconds:F1} 秒后隐藏。");
 
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await Task.Delay(interval, cts.Token).ConfigureAwait(false);
-
-                    await Dispatcher.InvokeAsync(() =>
-                    {
-                        if (!ReferenceEquals(_notificationCts, cts))
-                        {
-                            AppLogger.Info("检测到更新后的通知已经接管隐藏流程，本次定时任务忽略。");
-                            return;
-                        }
-
-                        AppLogger.Info("通知展示时长已到，由后台任务触发自动隐藏。");
-                        HideNotification();
-                    });
-                }
-                catch (TaskCanceledException)
-                {
-                    AppLogger.Info("通知隐藏任务已被取消，通常是新的通知到来或手动隐藏触发。");
-                }
-                catch (Exception ex)
-                {
-                    AppLogger.Error(ex, $"执行通知隐藏任务时出现异常: {ex.Message}");
-                }
-                finally
-                {
-                    if (ReferenceEquals(_notificationCts, cts))
-                    {
-                        CancelPendingNotificationHide();
-                    }
-                    cts.Dispose();
-                }
-            });
+            PrepareNotificationTimer(interval);
         }
 
 
@@ -165,19 +132,61 @@ namespace WpfVideoPet
         /// </summary>
         private void CancelPendingNotificationHide()
         {
-            var previousCts = Interlocked.Exchange(ref _notificationCts, null);
-            if (previousCts == null)
+            if (_notificationTimer == null)
             {
                 return;
             }
 
-            if (!previousCts.IsCancellationRequested)
+            if (_notificationTimer.IsEnabled)
             {
-                previousCts.Cancel();
+                _notificationTimer.Stop();
+                AppLogger.Info("已停止历史通知隐藏计时，避免旧任务误删新通知。");
+            }
+        }
+
+        /// <summary>
+        /// 初始化通知隐藏计时器，确保所有隐藏逻辑在 UI 线程执行，避免跨线程状态紊乱。
+        /// </summary>
+        private void InitializeNotificationTimer()
+        {
+            _notificationTimer = new DispatcherTimer
+            {
+                Interval = DefaultNotificationDuration
+            };
+            _notificationTimer.Tick += OnNotificationTimerTick;
+            AppLogger.Info("通知隐藏计时器已初始化，默认时长为 " + DefaultNotificationDuration.TotalSeconds + " 秒。");
+        }
+
+        /// <summary>
+        /// 在展示通知前根据业务需求重新配置计时器并启动。
+        /// </summary>
+        /// <param name="interval">通知展示时长。</param>
+        private void PrepareNotificationTimer(TimeSpan interval)
+        {
+            if (_notificationTimer == null)
+            {
+                InitializeNotificationTimer();
             }
 
-            previousCts.Dispose();
-            AppLogger.Info("已取消历史通知隐藏任务，避免旧任务误删新通知。");
+            if (_notificationTimer == null)
+            {
+                AppLogger.Warn("通知隐藏计时器初始化失败，无法自动隐藏通知。");
+                return;
+            }
+
+            CancelPendingNotificationHide();
+            _notificationTimer.Interval = interval;
+            _notificationTimer.Start();
+            AppLogger.Info($"通知隐藏计时器已重新启动，将在 {interval.TotalMilliseconds} ms 后自动隐藏。");
+        }
+
+        /// <summary>
+        /// 计时器到期时触发通知隐藏，确保交互体验一致。
+        /// </summary>
+        private void OnNotificationTimerTick(object? sender, EventArgs e)
+        {
+            AppLogger.Info("通知展示时长已到，由 DispatcherTimer 触发自动隐藏。");
+            HideNotification();
         }
 
         [DllImport("user32.dll")]
