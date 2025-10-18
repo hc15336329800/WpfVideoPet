@@ -31,6 +31,9 @@ namespace WpfVideoPet
         private VideoCallWindow? _videoCallWindow;
         private SpeechRecognitionEngine? _speechRecognizer;
         private const double WakeWordConfidenceThreshold = 0.45;
+        private const string DefaultTtsApiKey = "0fb097671abc68e6383f049571ac7eb2"; // 默认 TTS ApiKey。
+        private const string DefaultTtsApiSecret = "MjdjYzk3OGE1ZWQ3NTAxYTliZmUzNmYz"; // 默认 TTS ApiSecret。
+        private const string DefaultTtsAppId = "50334b7e"; // 默认 TTS AppId。
         private readonly DispatcherTimer _volumeRestoreTimer;
         /// <summary>
         /// 控制语音识别提示自动隐藏的计时器，避免识别文本长时间停留。
@@ -56,6 +59,10 @@ namespace WpfVideoPet
         private string? _currentLocalMediaPath;
         private string? _currentRemoteMediaUrl;
         private readonly AikitWakeService _wakeService;
+        /// <summary>
+        /// 文本转语音服务实例，处理唤醒后的播报需求。
+        /// </summary>
+        private readonly AikitSayService _sayService;
         /// <summary>
         /// 语音播报服务实例，用于进行实时转写。
         /// </summary>
@@ -144,7 +151,8 @@ namespace WpfVideoPet
                 AppLogger.Warn("语音播报服务未初始化，后续语音转写功能将不可用。");
             }
 
-            _wakeService = new AikitWakeService(_appConfig.Wake.SdkDirectory);
+            _sayService = BuildTtsService();
+            _wakeService = new AikitWakeService(_appConfig.Wake.SdkDirectory, _sayService);
             InitializeWakeService();
         }
 
@@ -1235,6 +1243,7 @@ namespace WpfVideoPet
             _wakeService.WakeKeywordRecognized -= OnWakeKeywordRecognized;
             _wakeService.SpeechRecognitionRequested -= OnSpeechRecognitionRequested;
             _wakeService.Dispose();
+            _sayService.Dispose();
 
             if (_bobaoService != null)
             {
@@ -1311,6 +1320,45 @@ namespace WpfVideoPet
             }
         }
 
+        /// <summary>
+        /// 构建文本转语音服务，根据外部配置决定是否覆盖默认的鉴权与能力参数。
+        /// </summary>
+        /// <returns>初始化完成的 TTS 服务实例。</returns>
+        private AikitSayService BuildTtsService()
+        {
+            var ttsConfig = _appConfig.Tts; // 读取配置文件中的 TTS 节点。
+            if (!ttsConfig.HasOverrides)
+            {
+                AppLogger.Info("准备使用默认讯飞鉴权信息初始化 TTS 服务。");
+                return new AikitSayService();
+            }
+
+            string apiKey = string.IsNullOrWhiteSpace(ttsConfig.ApiKey) ? DefaultTtsApiKey : ttsConfig.ApiKey; // 实际使用的 ApiKey。
+            string apiSecret = string.IsNullOrWhiteSpace(ttsConfig.ApiSecret) ? DefaultTtsApiSecret : ttsConfig.ApiSecret; // 实际使用的 ApiSecret。
+            string appId = string.IsNullOrWhiteSpace(ttsConfig.AppId) ? DefaultTtsAppId : ttsConfig.AppId; // 实际使用的 AppId。
+            string abilityId = ttsConfig.AbilityId; // 实际使用的能力编号。
+            string voiceName = ttsConfig.VoiceName; // 实际使用的发音人。
+            string? outputDirectory = string.IsNullOrWhiteSpace(ttsConfig.OutputDirectory) ? null : ttsConfig.OutputDirectory; // 实际使用的输出目录。
+
+            var settings = new AikitListenSettings
+            {
+                HostUrl = string.Empty,
+                ApiKey = apiKey,
+                ApiSecret = apiSecret,
+                AppId = appId,
+                AbilityId = abilityId,
+                VoiceName = voiceName,
+                OutputDirectory = outputDirectory
+            };
+
+            AppLogger.Info($"准备根据配置初始化 TTS 服务，AbilityId={abilityId}, VoiceName={(string.IsNullOrWhiteSpace(voiceName) ? "默认" : voiceName)}。");
+            if (!string.IsNullOrWhiteSpace(outputDirectory))
+            {
+                AppLogger.Info($"TTS 输出目录已配置为: {outputDirectory}");
+            }
+
+            return new AikitSayService(settings);
+        }
         private void OnWakeKeywordRecognized(object? sender, WakeKeywordEventArgs e)
         {
             void Show()

@@ -17,6 +17,7 @@ namespace WpfVideoPet
         public MqttConfig Mqtt { get; } = new();
         public AudioDuckingConfig AudioDucking { get; } = new();
         public WakeConfig Wake { get; } = new();
+        public TtsConfig Tts { get; } = new();
 
         public bool IsOperator => string.Equals(Role, "operator", StringComparison.OrdinalIgnoreCase);
 
@@ -159,6 +160,64 @@ namespace WpfVideoPet
                             if (duckingElement.TryGetProperty("restoreDelaySeconds", out var restoreDelayElement) && restoreDelayElement.TryGetInt32(out var restoreDelaySeconds))
                             {
                                 ducking.RestoreDelaySeconds = Math.Max(0, restoreDelaySeconds);
+                            }
+                        }
+                    }
+                    if (root.TryGetProperty("tts", out var ttsElement) && ttsElement.ValueKind == JsonValueKind.Object)
+                    {
+                        var tts = config.Tts; // 文本转语音配置节点。
+
+                        if (ttsElement.TryGetProperty("apiKey", out var ttsApiKeyElement))
+                        {
+                            var value = ttsApiKeyElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                tts.ApiKey = value.Trim();
+                            }
+                        }
+
+                        if (ttsElement.TryGetProperty("apiSecret", out var ttsApiSecretElement))
+                        {
+                            var value = ttsApiSecretElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                tts.ApiSecret = value.Trim();
+                            }
+                        }
+
+                        if (ttsElement.TryGetProperty("appId", out var ttsAppIdElement))
+                        {
+                            var value = ttsAppIdElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                tts.AppId = value.Trim();
+                            }
+                        }
+
+                        if (ttsElement.TryGetProperty("abilityId", out var abilityElement))
+                        {
+                            var value = abilityElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                tts.AbilityId = value.Trim();
+                            }
+                        }
+
+                        if (ttsElement.TryGetProperty("voiceName", out var voiceElement))
+                        {
+                            var value = voiceElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                tts.VoiceName = value.Trim();
+                            }
+                        }
+
+                        if (ttsElement.TryGetProperty("outputDirectory", out var outputDirElement))
+                        {
+                            var value = outputDirElement.GetString();
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                tts.OutputDirectory = value.Trim();
                             }
                         }
                     }
@@ -435,4 +494,51 @@ public sealed class WakeConfig
     /// 若指定，将在运行时自动复制缺失的原生文件到程序目录。
     /// </summary>
     public string? SdkDirectory { get; set; }
+}
+
+/// <summary>
+/// 文本转语音相关配置，允许覆盖默认的讯飞鉴权与能力参数。
+/// </summary>
+public sealed class TtsConfig
+{
+    /// <summary>
+    /// 可选的 ApiKey，留空时沿用内置默认值。
+    /// </summary>
+    public string ApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 可选的 ApiSecret，留空时沿用内置默认值。
+    /// </summary>
+    public string ApiSecret { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 可选的 AppId，留空时沿用内置默认值。
+    /// </summary>
+    public string AppId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 文本转语音能力编号，可用于匹配自定义的 TTS 能力。
+    /// </summary>
+    public string AbilityId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 默认发音人名称，留空时使用 SDK 内置的默认发音人。
+    /// </summary>
+    public string VoiceName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 可选的输出目录，支持相对路径与绝对路径。
+    /// </summary>
+    public string? OutputDirectory { get; set; }
+
+    /// <summary>
+    /// 指示是否提供了覆盖默认 TTS 行为的配置。
+    /// </summary>
+    public bool HasOverrides =>
+        !string.IsNullOrWhiteSpace(ApiKey) ||
+        !string.IsNullOrWhiteSpace(ApiSecret) ||
+        !string.IsNullOrWhiteSpace(AppId) ||
+        !string.IsNullOrWhiteSpace(AbilityId) ||
+        !string.IsNullOrWhiteSpace(VoiceName) ||
+        !string.IsNullOrWhiteSpace(OutputDirectory);
 }

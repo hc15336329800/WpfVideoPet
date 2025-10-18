@@ -29,6 +29,21 @@ namespace WpfVideoPet
         public string AppId { get; init; } = string.Empty;
 
         /// <summary>
+        /// 文本转语音能力编号，用于调用具体的 TTS 服务能力。
+        /// </summary>
+        public string AbilityId { get; init; } = string.Empty;
+
+        /// <summary>
+        /// 默认发音人名称，留空时使用小燕。
+        /// </summary>
+        public string VoiceName { get; init; } = string.Empty;
+
+        /// <summary>
+        /// 可选的音频输出目录，留空时使用应用根目录下的 tts_output。
+        /// </summary>
+        public string? OutputDirectory { get; init; }
+
+        /// <summary>
         /// 从 JSON 配置文件加载播报设置，若文件不存在或字段缺失则抛出异常。
         /// </summary>
         /// <param name="filePath">配置文件的绝对路径。</param>
@@ -53,6 +68,10 @@ namespace WpfVideoPet
             string apiKey = xfyunElement.GetPropertyOrDefault("ApiKey");
             string apiSecret = xfyunElement.GetPropertyOrDefault("ApiSecret");
             string appId = xfyunElement.GetPropertyOrDefault("AppId");
+            string abilityId = xfyunElement.GetPropertyOrDefault("AbilityId");
+            string voiceName = xfyunElement.GetPropertyOrDefault("VoiceName");
+            string outputDirectory = xfyunElement.GetPropertyOrDefault("OutputDirectory");
+
 
             if (string.IsNullOrWhiteSpace(hostUrl) || string.IsNullOrWhiteSpace(apiKey) ||
                 string.IsNullOrWhiteSpace(apiSecret) || string.IsNullOrWhiteSpace(appId))
@@ -65,7 +84,10 @@ namespace WpfVideoPet
                 HostUrl = hostUrl,
                 ApiKey = apiKey,
                 ApiSecret = apiSecret,
-                AppId = appId
+                AppId = appId,
+                AbilityId = abilityId,
+                VoiceName = voiceName,
+                OutputDirectory = string.IsNullOrWhiteSpace(outputDirectory) ? null : outputDirectory
             };
         }
     }

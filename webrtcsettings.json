@@ -53,5 +53,15 @@
       "enabled": false,
       "restoreDelaySeconds": 5
     }
+  },
+
+  "tts": {
+    "_comment": "文本转语音配置，可在此覆盖默认的讯飞鉴权与能力参数。",
+    "apiKey": "",
+    "apiSecret": "",
+    "appId": "",
+    "abilityId": "",
+    "voiceName": "",
+    "outputDirectory": ""
   }
 }

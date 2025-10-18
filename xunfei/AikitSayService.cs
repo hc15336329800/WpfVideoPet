@@ -16,10 +16,13 @@ namespace WpfVideoPet.xunfei
         // 默认讯飞播报配置。
         private static readonly AikitListenSettings DefaultSettings = new()
         {
-            HostUrl = "",
+            HostUrl = string.Empty,
             ApiKey = "0fb097671abc68e6383f049571ac7eb2",
             ApiSecret = "MjdjYzk3OGE1ZWQ3NTAxYTliZmUzNmYz",
-            AppId = "50334b7e"
+            AppId = "50334b7e",
+            AbilityId = DefaultAbilityId,
+            VoiceName = DefaultVoiceName,
+            OutputDirectory = DefaultOutputDirectoryName
         };
 
         // 默认鉴权方式。
@@ -28,6 +31,8 @@ namespace WpfVideoPet.xunfei
         private const string DefaultAbilityId = "e2e44feff";
         // 默认发音人。
         private const string DefaultVoiceName = "xiaoyan";
+        // 默认输出目录名称。
+        private const string DefaultOutputDirectoryName = "tts_output";
         // 默认语言编码。
         private const int DefaultLanguage = 1;
         // 默认文本编码格式。
@@ -80,7 +85,7 @@ namespace WpfVideoPet.xunfei
         /// <param name="voiceName">可选的发音人名称，默认使用小燕。</param>
         /// <param name="cancellationToken">外部传入的取消令牌。</param>
         /// <returns>合成成功时的 WAV 文件绝对路径，失败或取消时返回 null。</returns>
-        public async Task<string?> SynthesizeAsync(string text, string voiceName = DefaultVoiceName, CancellationToken cancellationToken = default)
+        public async Task<string?> SynthesizeAsync(string text, string? voiceName = null, CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
 
@@ -131,14 +136,15 @@ namespace WpfVideoPet.xunfei
         /// <param name="voiceName">需要使用的发音人。</param>
         /// <param name="cancellationToken">取消标记。</param>
         /// <returns>合成成功的 WAV 文件路径或 null。</returns>
-        private string? SynthesizeInternal(string text, string voiceName, CancellationToken cancellationToken)
+        private string? SynthesizeInternal(string text, string? voiceName, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             EnsureInitialized();
             // 应用程序根目录。
             string baseDirectory = AppContext.BaseDirectory;
-            // 文本转语音输出目录。
-            string outputDirectory = Path.Combine(baseDirectory, "tts_output");
+            // TTS 输出目录。
+            string outputDirectory = ResolveOutputDirectory(baseDirectory);
+            AppLogger.Info($"TTS 音频输出目录: {outputDirectory}");
             Directory.CreateDirectory(outputDirectory);
 
             // 输出文件名称前缀。
@@ -148,6 +154,13 @@ namespace WpfVideoPet.xunfei
             // WAV 文件路径。
             string wavPath = Path.Combine(outputDirectory, fileStem + ".wav");
 
+            // 实际发音人。
+            string voiceToUse = ResolveVoiceName(voiceName);
+            AppLogger.Info($"准备使用发音人: {voiceToUse}");
+
+            // 实际能力编号。
+            string abilityId = ResolveAbilityId();
+            AppLogger.Info($"准备使用 TTS 能力编号: {abilityId}");
 
             using var session = new SynthesisSession(pcmPath, wavPath);
             session.CleanupOutputs();
@@ -174,8 +187,8 @@ namespace WpfVideoPet.xunfei
                     return null;
                 }
 
-                AddStringParam(paramBuilder, "vcn", voiceName);
-                AddStringParam(paramBuilder, "vcnModel", voiceName);
+                AddStringParam(paramBuilder, "vcn", voiceToUse);
+                AddStringParam(paramBuilder, "vcnModel", voiceToUse);
                 // 语言参数写入结果。
                 int languageResult = NativeMethods.AIKITBuilder_AddInt(paramBuilder, "language", DefaultLanguage);
                 AppLogger.Info($"写入语言参数返回码：{languageResult}。");
@@ -198,6 +211,7 @@ namespace WpfVideoPet.xunfei
                 AppLogger.Info($"文本数据已写入讯飞数据构造器，返回码：{addBufResult}。");
                 if (addBufResult != 0)
                 {
+                    AppLogger.Error($"写入文本数据失败，返回码：{addBufResult}。");
                     return null;
                 }
 
@@ -205,10 +219,11 @@ namespace WpfVideoPet.xunfei
                 IntPtr dataPtr = NativeMethods.AIKITBuilder_BuildData(dataBuilder);
 
                 AppLogger.Info("准备启动讯飞 TTS 会话。");
-                int startResult = NativeMethods.AIKIT_Start(DefaultAbilityId, paramPtr, IntPtr.Zero, ref handlePtr);
-                AppLogger.Info($"AIKIT_Start 返回码：{startResult}。");
+                int startResult = NativeMethods.AIKIT_Start(abilityId, paramPtr, IntPtr.Zero, ref handlePtr);
+                AppLogger.Info($"AIKIT_Start 返回码：{startResult}，AbilityId={abilityId}。");
                 if (startResult != 0)
                 {
+                    AppLogger.Error($"讯飞 TTS 会话启动失败，错误码：{startResult}，请核对 AppId、AbilityId 与鉴权信息是否匹配。");
                     return null;
                 }
 
@@ -276,6 +291,47 @@ namespace WpfVideoPet.xunfei
         }
 
         /// <summary>
+        /// 解析最终使用的发音人，优先采用外部参数，其次读取配置，最后回退到默认值。
+        /// </summary>
+        /// <param name="voiceName">调用方指定的发音人。</param>
+        /// <returns>最终用于 TTS 请求的发音人名称。</returns>
+        private string ResolveVoiceName(string? voiceName)
+        {
+            string configuredVoice = string.IsNullOrWhiteSpace(_settings.VoiceName) ? DefaultVoiceName : _settings.VoiceName;
+            return string.IsNullOrWhiteSpace(voiceName) ? configuredVoice : voiceName;
+        }
+
+        /// <summary>
+        /// 解析最终使用的能力编号，允许通过配置覆盖默认值。
+        /// </summary>
+        /// <returns>可用于 AIKIT_Start 的能力编号。</returns>
+        private string ResolveAbilityId()
+        {
+            return string.IsNullOrWhiteSpace(_settings.AbilityId) ? DefaultAbilityId : _settings.AbilityId;
+        }
+
+        /// <summary>
+        /// 解析最终使用的输出目录，支持绝对路径与相对路径。
+        /// </summary>
+        /// <param name="baseDirectory">应用根目录，用于拼接相对路径。</param>
+        /// <returns>确保有效的输出目录。</returns>
+        private string ResolveOutputDirectory(string baseDirectory)
+        {
+            if (!string.IsNullOrWhiteSpace(_settings.OutputDirectory))
+            {
+                string configured = _settings.OutputDirectory;
+                if (Path.IsPathRooted(configured))
+                {
+                    return configured;
+                }
+
+                return Path.GetFullPath(Path.Combine(baseDirectory, configured));
+            }
+
+            return Path.Combine(baseDirectory, DefaultOutputDirectoryName);
+
+        }
+        /// <summary>
         /// 确保讯飞 AIKIT SDK 已完成初始化并注册回调。
         /// </summary>
         private void EnsureInitialized()
@@ -332,7 +388,8 @@ namespace WpfVideoPet.xunfei
                 int registerResult = NativeMethods.AIKIT_RegisterCallback(callbacks);
                 AppLogger.Info($"讯飞 TTS 回调注册结果：{registerResult}。");
 
-                AppLogger.Info($"即将初始化讯飞 SDK，AppId={_settings.AppId}，AbilityId={DefaultAbilityId}。");
+                string abilityId = ResolveAbilityId(); // 初始化时记录实际能力编号。
+                AppLogger.Info($"即将初始化讯飞 SDK，AppId={_settings.AppId}，AbilityId={abilityId}。");
                 int initResult = NativeMethods.AIKIT_Init(ref initParam);
                 if (initResult != 0)
                 {
