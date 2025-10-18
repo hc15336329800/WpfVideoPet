@@ -1296,7 +1296,8 @@ namespace WpfVideoPet
         {
             try
             {
-                var configPath = Path.Combine(baseDirectory, "aikitbobao.appsettings.json");
+                var configPath = Path.Combine(baseDirectory, "config", "aikitbobao.appsettings.json");
+                AppLogger.Info($"准备从配置路径加载讯飞播报设置: {configPath}");
                 var settings = AikitBobaoSettings.Load(configPath);
                 var service = new AikitBobaoService(settings);
                 service.InterimResultReceived += OnBobaoInterimResult;
@@ -1451,8 +1452,6 @@ namespace WpfVideoPet
 
             UpdateTranscriptionDisplay("语音识别中...", text);
         }
-
-
         /// <summary>
         /// 播报服务完成识别后展示最终结果。
         /// </summary>
@@ -1460,10 +1459,12 @@ namespace WpfVideoPet
         {
             if (string.IsNullOrWhiteSpace(text))
             {
+                AppLogger.Info("语音识别完成但未返回有效文本，保持默认提示。");
                 UpdateTranscriptionDisplay("识别结束", "未识别到有效语音内容。");
             }
             else
             {
+                AppLogger.Info($"语音识别完成，最终文本: {text}");
                 UpdateTranscriptionDisplay("识别结果", text);
             }
         }
@@ -1474,6 +1475,7 @@ namespace WpfVideoPet
         /// </summary>
         private void OnBobaoRecognitionFailed(object? sender, string message)
         {
+            AppLogger.Warn($"语音识别回调失败，返回消息: {message}");
             var content = string.IsNullOrWhiteSpace(message) ? "语音识别失败，请稍后重试。" : message;
             UpdateTranscriptionDisplay("识别失败", content);
         }
