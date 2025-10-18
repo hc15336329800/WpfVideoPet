@@ -1295,10 +1295,9 @@ namespace WpfVideoPet
         {
             try
             {
-                var configPath = Path.Combine(baseDirectory, "config", "aikitbobao.appsettings.json");
-                AppLogger.Info($"准备从配置路径加载讯飞播报设置: {configPath}");
-                var settings = AikitBobaoSettings.Load(configPath);
-                var service = new AikitListenService(settings);
+                AppLogger.Info("准备使用内置配置初始化讯飞播报服务，无需读取外部文件。");
+                var service = new AikitListenService();
+
                 service.InterimResultReceived += OnBobaoInterimResult;
                 service.RecognitionCompleted += OnBobaoRecognitionCompleted;
                 service.RecognitionFailed += OnBobaoRecognitionFailed;

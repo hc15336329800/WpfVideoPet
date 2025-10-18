@@ -59,10 +59,6 @@
                 </None>
         </ItemGroup>
 
-        <ItemGroup>
-          <Folder Include="讯飞文字合成语音例子\" />
-        </ItemGroup>
-
 
 	<Target Name="EnsureWpfVideoPetNotRunning" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
 		<Exec Command="taskkill /F /IM WpfVideoPet.exe" ContinueOnError="true" />

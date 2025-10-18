@@ -20,6 +20,16 @@ namespace WpfVideoPet.xunfei
         private const int StatusContinueFrame = 1;
         private const int StatusLastFrame = 2;
 
+        // 默认讯飞播报配置。
+        private static readonly AikitBobaoSettings DefaultSettings = new()
+        {
+            HostUrl = "wss://iat-api.xfyun.cn/v2/iat",
+            ApiKey = "0fb097671abc68e6383f049571ac7eb2",
+            ApiSecret = "MjdjYzk3OGE1ZWQ3NTAxYTliZmUzNmYz",
+            AppId = "50334b7e"
+        };
+
+ 
         private readonly AikitBobaoSettings _settings;
          private bool _disposed;
          private ClientWebSocket? _webSocket;
@@ -43,12 +53,21 @@ namespace WpfVideoPet.xunfei
         private readonly SemaphoreSlim _recognitionLock = new(1, 1);
 
         /// <summary>
-        /// 构造函数，注入基础配置。
+        /// 使用指定的讯飞语音识别配置初始化服务实例。
         /// </summary>
         /// <param name="settings">包含讯飞接口鉴权信息的配置对象。</param>
         public AikitListenService(AikitBobaoSettings settings)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        }
+
+        /// <summary>
+        /// 使用内置的讯飞语音识别配置构造服务实例，避免外部读取配置文件。
+        /// </summary>
+        public AikitListenService()
+            : this(DefaultSettings)
+        {
+            AppLogger.Info("AikitListenService 已使用内置的讯飞接口配置完成初始化。");
         }
 
         /// <summary>
