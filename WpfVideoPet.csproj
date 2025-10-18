@@ -54,9 +54,10 @@
                 <None Update="webrtcsettings.json">
                         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
                 </None>
-                <None Update="config\aikitbobao.appsettings.json">
-                        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-                </None>
+        </ItemGroup>
+
+        <ItemGroup>
+          <Folder Include="config\" />
         </ItemGroup>
 
 

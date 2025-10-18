@@ -28,7 +28,7 @@ internal static class Program
     /// <summary>
     /// 主函数：初始化 SDK、注册回调并执行一次文本转语音流程。
     /// </summary>
-    private static void Main()
+    private static void Main66()
     {
         // 设置控制台编码
         Console.OutputEncoding = Encoding.UTF8;
