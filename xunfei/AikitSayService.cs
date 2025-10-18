@@ -14,7 +14,7 @@ namespace WpfVideoPet.xunfei
     public sealed class AikitSayService : IDisposable
     {
         // 默认讯飞播报配置。
-        private static readonly AikitBobaoSettings DefaultSettings = new()
+        private static readonly AikitListenSettings DefaultSettings = new()
         {
             HostUrl = "wss://iat-api.xfyun.cn/v2/iat",
             ApiKey = "0fb097671abc68e6383f049571ac7eb2",
@@ -32,7 +32,7 @@ namespace WpfVideoPet.xunfei
         private static readonly ConcurrentDictionary<IntPtr, SynthesisSession> Sessions = new();
 
         // 服务内部使用的讯飞配置。
-        private readonly AikitBobaoSettings _settings;
+        private readonly AikitListenSettings _settings;
         // 初始化过程的同步锁。
         private readonly object _initLock = new();
         // 控制串行执行的信号量。
@@ -48,7 +48,7 @@ namespace WpfVideoPet.xunfei
         /// </summary>
         /// <param name="settings">包含 ApiKey、ApiSecret、AppId 的讯飞配置。</param>
         /// <exception cref="ArgumentNullException">当配置为空时抛出。</exception>
-        public AikitSayService(AikitBobaoSettings settings)
+        public AikitSayService(AikitListenSettings settings)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         }

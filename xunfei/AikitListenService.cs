@@ -21,7 +21,7 @@ namespace WpfVideoPet.xunfei
         private const int StatusLastFrame = 2;
 
         // 默认讯飞播报配置。
-        private static readonly AikitBobaoSettings DefaultSettings = new()
+        private static readonly AikitListenSettings DefaultSettings = new()
         {
             HostUrl = "wss://iat-api.xfyun.cn/v2/iat",
             ApiKey = "0fb097671abc68e6383f049571ac7eb2",
@@ -30,7 +30,7 @@ namespace WpfVideoPet.xunfei
         };
 
  
-        private readonly AikitBobaoSettings _settings;
+        private readonly AikitListenSettings _settings;
          private bool _disposed;
          private ClientWebSocket? _webSocket;
         /// <summary>
@@ -56,7 +56,7 @@ namespace WpfVideoPet.xunfei
         /// 使用指定的讯飞语音识别配置初始化服务实例。
         /// </summary>
         /// <param name="settings">包含讯飞接口鉴权信息的配置对象。</param>
-        public AikitListenService(AikitBobaoSettings settings)
+        public AikitListenService(AikitListenSettings settings)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         }

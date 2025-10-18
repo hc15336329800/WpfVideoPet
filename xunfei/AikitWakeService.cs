@@ -25,6 +25,7 @@ namespace WpfVideoPet.xunfei
         private const string AppId = "50334b7e";
         private const string ApiKey = "0fb097671abc68e6383f049571ac7eb2";
         private const string ApiSecret = "MjdjYzk3OGE1ZWQ3NTAxYTliZmUzNmYz";
+        private const string YellowWakeDefaultText = "您好，小黄已为您准备好服务，请稍候我为您继续处理。"; // “小黄小黄”默认播报文本。
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate void AD_OnOutput(nint abilityId, nint key, nint value);
@@ -62,16 +63,18 @@ namespace WpfVideoPet.xunfei
         private static readonly string[] KnownSdkDirectories =
         {  @"D:\C#_code\WpfVideoPet\DLL"        };
 
-        private readonly string? _externalSdkDirectory;
-        private readonly object _syncRoot = new();
-        private WaveInEvent? _mic;
-        private bool _disposed;
-        private bool _initialized;
-        private bool _sessionStarted;
-        private string? _originalWorkingDirectory;
-        private string? _workDir;
-        private string? _resDir;
-        private string? _keywordPath;
+        private readonly string? _externalSdkDirectory; // 外部 SDK 目录。
+        private readonly object _syncRoot = new(); // 同步锁对象。
+        private readonly AikitSayService _sayService; // TTS 播报服务实例。
+        private readonly bool _ownsSayService; // 是否由当前对象托管 TTS 服务。
+        private WaveInEvent? _mic; // 麦克风实例。
+        private bool _disposed; // 是否已释放标记。
+        private bool _initialized; // 是否已初始化标记。
+        private bool _sessionStarted; // 会话是否已开启标记。
+        private string? _originalWorkingDirectory; // 原始工作目录。
+        private string? _workDir; // 当前工作目录。
+        private string? _resDir; // 资源目录。
+        private string? _keywordPath; // 唤醒词路径。
 
         private AD_OnOutput? _outputCallback;
         private AD_OnEvent? _eventCallback;
@@ -83,7 +86,8 @@ namespace WpfVideoPet.xunfei
         /// 初始化服务，可传入包含完整 SDK 的目录。
         /// </summary>
         /// <param name="sdkDirectory">包含原生 DLL、keyword.txt 以及 resource 目录的 SDK 根路径。</param>
-        public AikitWakeService(string? sdkDirectory = null)
+        /// <param name="sayService">用于文本转语音播报的服务实例，可为空。</param>
+        public AikitWakeService(string? sdkDirectory = null, AikitSayService? sayService = null)
         {
             if (!string.IsNullOrWhiteSpace(sdkDirectory))
             {
@@ -96,6 +100,9 @@ namespace WpfVideoPet.xunfei
                     _externalSdkDirectory = sdkDirectory;
                 }
             }
+            _sayService = sayService ?? new AikitSayService();
+            _ownsSayService = sayService is null;
+            AppLogger.Info("AikitWakeService 已完成 TTS 服务初始化，准备处理播报需求。");
         }
 
 
@@ -311,6 +318,28 @@ namespace WpfVideoPet.xunfei
                         case "小白小白":
                             AppLogger.Info("触发“小白小白”业务逻辑：例如启动语音助手或开启常用功能。");
                             notificationMessage = "已唤醒“小白小白”，正在为您准备常用功能。";
+                            PlayDing();
+                            AppLogger.Info("准备触发“小黄小黄”默认播报文本的音频合成流程。");
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    var ttsPath = await _sayService.SynthesizeAsync(YellowWakeDefaultText).ConfigureAwait(false);
+                                    if (!string.IsNullOrWhiteSpace(ttsPath))
+                                    {
+                                        AppLogger.Info($"“小黄小黄”默认播报音频生成完成，输出文件：{ttsPath}");
+                                    }
+                                    else
+                                    {
+                                        AppLogger.Warn("“小黄小黄”默认播报音频生成返回空路径，请检查 TTS 服务状态。");
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    AppLogger.Error(ex, $"执行“小黄小黄”默认播报时发生异常：{ex.Message}");
+                                }
+                            });
+
                             break;
                         case "小黄小黄":
                             AppLogger.Info("触发“小黄小黄”业务逻辑：例如播报天气或执行定制命令。");
@@ -319,6 +348,8 @@ namespace WpfVideoPet.xunfei
                             // 播放默认提示音反馈用户操作，再延迟一秒启动语音转写。
                             AppLogger.Info("播放默认唤醒提示音，告知用户已成功唤醒。");
                             PlayDing();
+
+
 
                             AppLogger.Info("已播放提示音，将在 1 秒后触发语音识别流程。");
                             _ = Task.Run(async () =>
