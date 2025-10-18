@@ -51,10 +51,10 @@
 	</ItemGroup>
 
         <ItemGroup>
-                <None Update="webrtcsettings.json">
+                <None Update="config\webrtcsettings.json">
                         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
                 </None>
-                <None Update="aikitbobao.appsettings.json">
+                <None Update="config\aikitbobao.appsettings.json">
                         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
                 </None>
         </ItemGroup>

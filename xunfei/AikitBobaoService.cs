@@ -8,8 +8,9 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using NAudio.Wave;
+using WpfVideoPet.config;
 
-namespace WpfVideoPet
+namespace WpfVideoPet.xunfei
 {
     /// <summary>
     /// 负责驱动麦克风采集与讯飞实时语音识别的服务，基于控制台 Demo 的逻辑封装。
@@ -21,10 +22,8 @@ namespace WpfVideoPet
         private const int StatusLastFrame = 2;
 
         private readonly AikitBobaoSettings _settings;
-        private readonly object _stateLock = new();
-        private bool _disposed;
-        private bool _recognizing;
-        private ClientWebSocket? _webSocket;
+         private bool _disposed;
+         private ClientWebSocket? _webSocket;
         /// <summary>
         /// 当前使用的麦克风采集实例。
         /// </summary>
@@ -38,6 +37,11 @@ namespace WpfVideoPet
         private TaskCompletionSource<string?>? _resultSource;
         private readonly Stopwatch _latencyStopwatch = new();
         private bool _waitingLatency;
+
+                  /// <summary>
+                  /// 控制语音识别流程串行执行的同步原语，避免上一轮尚未释放资源时返回旧结果。
+                  /// </summary>
+        private readonly SemaphoreSlim _recognitionLock = new(1, 1);
 
         /// <summary>
         /// 构造函数，注入基础配置。
@@ -72,16 +76,10 @@ namespace WpfVideoPet
         {
             ThrowIfDisposed();
 
-            lock (_stateLock)
-            {
-                if (_recognizing)
-                {
-                    AppLogger.Warn("检测到已有语音识别任务正在运行，本次请求将被忽略。");
-                    return null;
-                }
+            AppLogger.Info("准备启动新的语音识别任务，等待内部同步锁释放。");
+            await _recognitionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            AppLogger.Info("已获取语音识别内部锁，开始构建语音识别管线。");
 
-                _recognizing = true;
-            }
 
             try
             {
@@ -119,10 +117,8 @@ namespace WpfVideoPet
             finally
             {
                 await CleanupAsync().ConfigureAwait(false);
-                lock (_stateLock)
-                {
-                    _recognizing = false;
-                }
+                _recognitionLock.Release();
+
             }
         }
 
@@ -233,10 +229,10 @@ namespace WpfVideoPet
                         status = StatusContinueFrame;
                     }
 
-                    bool timeout = (Environment.TickCount - startTick) >= maxSessionMs;
-                    bool idleTimeout = !voiceDetected && (Environment.TickCount - startTick) >= maxIdleMs;
+                    bool timeout = Environment.TickCount - startTick >= maxSessionMs;
+                    bool idleTimeout = !voiceDetected && Environment.TickCount - startTick >= maxIdleMs;
 
-                    if ((voiceDetected && calibrated && silenceMs >= silenceHoldMs) || timeout || idleTimeout)
+                    if (voiceDetected && calibrated && silenceMs >= silenceHoldMs || timeout || idleTimeout)
                     {
                         if (!closing)
                         {

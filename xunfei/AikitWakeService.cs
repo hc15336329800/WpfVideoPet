@@ -11,7 +11,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace WpfVideoPet
+namespace WpfVideoPet.xunfei
 {
     /// <summary>
     /// 讯飞语音唤醒
@@ -27,13 +27,13 @@ namespace WpfVideoPet
         private const string ApiSecret = "MjdjYzk3OGE1ZWQ3NTAxYTliZmUzNmYz";
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate void AD_OnOutput(IntPtr abilityId, IntPtr key, IntPtr value);
+        private delegate void AD_OnOutput(nint abilityId, nint key, nint value);
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate void AD_OnEvent(IntPtr abilityId, int eventType, IntPtr payload);
+        private delegate void AD_OnEvent(nint abilityId, int eventType, nint payload);
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate void AD_OnError(IntPtr abilityId, int errCode, IntPtr desc);
+        private delegate void AD_OnError(nint abilityId, int errCode, nint desc);
 
         [DllImport("AikitDll.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         private static extern int AD_Init(string appId, string apiKey, string apiSecret, string workDir, string resDir);
@@ -282,7 +282,7 @@ namespace WpfVideoPet
         /// <param name="abilityPtr">能力标识指针。</param>
         /// <param name="keyPtr">输出键名指针。</param>
         /// <param name="valuePtr">输出值指针。</param>
-        private void OnWakeOutput(IntPtr abilityPtr, IntPtr keyPtr, IntPtr valuePtr)
+        private void OnWakeOutput(nint abilityPtr, nint keyPtr, nint valuePtr)
         {
             var key = PtrToUtf8(keyPtr);
             var value = PtrToUtf8(valuePtr);
@@ -648,9 +648,9 @@ namespace WpfVideoPet
         /// </summary>
         /// <param name="ptr">UTF-8 文本指针。</param>
         /// <returns>转换后的托管字符串。</returns>
-        private static string PtrToUtf8(IntPtr ptr)
+        private static string PtrToUtf8(nint ptr)
         {
-            if (ptr == IntPtr.Zero)
+            if (ptr == nint.Zero)
             {
                 return string.Empty;
             }

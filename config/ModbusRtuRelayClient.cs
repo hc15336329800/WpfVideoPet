@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using System.Globalization;
 using System.Text;
 
-namespace WpfVideoPet
+namespace WpfVideoPet.config
 {
     /// <summary>
     /// 为 RS485 继电器模块提供 Modbus RTU 读写能力，支持读取与写入 8 路开关量。
@@ -129,7 +129,7 @@ namespace WpfVideoPet
                 var byteIndex = i / 8;
                 var bitIndex = i % 8;
                 var value = response[3 + byteIndex];
-                result[i] = (value & (1 << bitIndex)) != 0;
+                result[i] = (value & 1 << bitIndex) != 0;
             }
 
             return result;
@@ -140,9 +140,9 @@ namespace WpfVideoPet
             var frame = new byte[8];
             frame[0] = _slaveAddress;
             frame[1] = 0x01;
-            frame[2] = (byte)((startAddress >> 8) & 0xFF);
+            frame[2] = (byte)(startAddress >> 8 & 0xFF);
             frame[3] = (byte)(startAddress & 0xFF);
-            frame[4] = (byte)((count >> 8) & 0xFF);
+            frame[4] = (byte)(count >> 8 & 0xFF);
             frame[5] = (byte)(count & 0xFF);
             WriteCrc(frame);
             return frame;
@@ -153,7 +153,7 @@ namespace WpfVideoPet
             var frame = new byte[8];
             frame[0] = _slaveAddress;
             frame[1] = 0x05;
-            frame[2] = (byte)((address >> 8) & 0xFF);
+            frame[2] = (byte)(address >> 8 & 0xFF);
             frame[3] = (byte)(address & 0xFF);
             frame[4] = isOn ? (byte)0xFF : (byte)0x00;
             frame[5] = 0x00;
@@ -167,9 +167,9 @@ namespace WpfVideoPet
             var frame = new byte[7 + byteCount + 2];
             frame[0] = _slaveAddress;
             frame[1] = 0x0F;
-            frame[2] = (byte)((startAddress >> 8) & 0xFF);
+            frame[2] = (byte)(startAddress >> 8 & 0xFF);
             frame[3] = (byte)(startAddress & 0xFF);
-            frame[4] = (byte)((states.Count >> 8) & 0xFF);
+            frame[4] = (byte)(states.Count >> 8 & 0xFF);
             frame[5] = (byte)(states.Count & 0xFF);
             frame[6] = (byte)byteCount;
 
@@ -211,7 +211,7 @@ namespace WpfVideoPet
         {
             var crc = ComputeCrc(frame, frame.Length - 2);
             frame[^2] = (byte)(crc & 0xFF);
-            frame[^1] = (byte)((crc >> 8) & 0xFF);
+            frame[^1] = (byte)(crc >> 8 & 0xFF);
         }
 
         private async Task<byte[]> SendAndValidateAsync(byte[] request, byte functionCode, CancellationToken cancellationToken)
@@ -333,7 +333,7 @@ namespace WpfVideoPet
             }
 
             var lengthWithoutCrc = frame.Length - 2;
-            var expectedCrc = (ushort)(frame[lengthWithoutCrc] | (frame[lengthWithoutCrc + 1] << 8));
+            var expectedCrc = (ushort)(frame[lengthWithoutCrc] | frame[lengthWithoutCrc + 1] << 8);
             var actualCrc = ComputeCrc(frame, lengthWithoutCrc);
             if (expectedCrc != actualCrc)
             {

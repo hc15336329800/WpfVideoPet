@@ -1,6 +1,6 @@
 ﻿using System.IO.Ports;
 
-namespace WpfVideoPet
+namespace WpfVideoPet.config
 {
     public sealed class ModbusConfig
     {
