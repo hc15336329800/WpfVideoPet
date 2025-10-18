@@ -5,7 +5,6 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
-using WpfVideoPet.config;
 
 namespace WpfVideoPet
 {

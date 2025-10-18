@@ -1,7 +1,7 @@
 ﻿using System.IO;
 using System.Text.Json;
 
-namespace WpfVideoPet.config
+namespace WpfVideoPet
 {
     /// <summary>
     /// 讯飞语音识别播报服务的基础配置，负责承载接口地址与鉴权信息。

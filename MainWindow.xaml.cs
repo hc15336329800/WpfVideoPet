@@ -15,7 +15,6 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
-using WpfVideoPet.config;
 using WpfVideoPet.mqtt;
 using WpfVideoPet.xunfei;
 

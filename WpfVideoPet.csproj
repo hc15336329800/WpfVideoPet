@@ -51,12 +51,16 @@
 	</ItemGroup>
 
         <ItemGroup>
-                <None Update="config\webrtcsettings.json">
+                <None Update="webrtcsettings.json">
                         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
                 </None>
                 <None Update="config\aikitbobao.appsettings.json">
                         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
                 </None>
+        </ItemGroup>
+
+        <ItemGroup>
+          <Folder Include="讯飞文字合成语音例子\" />
         </ItemGroup>
 
 
