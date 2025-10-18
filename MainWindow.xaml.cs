@@ -59,7 +59,7 @@ namespace WpfVideoPet
         /// <summary>
         /// 语音播报服务实例，用于进行实时转写。
         /// </summary>
-        private readonly AikitBobaoService? _bobaoService;
+        private readonly AikitListenService? _bobaoService;
         /// <summary>
         /// 控制语音识别任务状态的锁对象。
         /// </summary>
@@ -1291,14 +1291,14 @@ namespace WpfVideoPet
         /// </summary>
         /// <param name="baseDirectory">应用根目录，用于定位配置文件。</param>
         /// <returns>初始化完成的服务实例或 null。</returns>
-        private AikitBobaoService? BuildBobaoService(string baseDirectory)
+        private AikitListenService? BuildBobaoService(string baseDirectory)
         {
             try
             {
                 var configPath = Path.Combine(baseDirectory, "config", "aikitbobao.appsettings.json");
                 AppLogger.Info($"准备从配置路径加载讯飞播报设置: {configPath}");
                 var settings = AikitBobaoSettings.Load(configPath);
-                var service = new AikitBobaoService(settings);
+                var service = new AikitListenService(settings);
                 service.InterimResultReceived += OnBobaoInterimResult;
                 service.RecognitionCompleted += OnBobaoRecognitionCompleted;
                 service.RecognitionFailed += OnBobaoRecognitionFailed;
