@@ -20,7 +20,8 @@ namespace WpfVideoPet.xunfei
             internal static extern IntPtr LoadLibrary(string lpFileName);
         }
         //  预加载原生库，确保独立运行
-
+        private const string OriginalDllFileName = "AEE_lib.dll"; // 原始 DLL 文件名
+        private const string RemappedDllFileName = "AEE_tts.dll"; // 重命名后的隔离副本
         /// <summary>
         /// 预加载 SayDLL 子目录中的原生库，确保无需修改全局 DLL 搜索路径也能解析依赖。
         /// </summary>
@@ -29,14 +30,26 @@ namespace WpfVideoPet.xunfei
         private static void EnsureNativeLibrariesLoaded(string sayDllDir, bool preloadAll = true)
         {
             if (!Directory.Exists(sayDllDir)) throw new DirectoryNotFoundException($"未找到 SayDLL 目录：{sayDllDir}");
+            var remappedDllPath = PrepareIsolatedAeeLibrary(sayDllDir); // 复制后的 DLL 路径
 
             if (!preloadAll)
             {
+                if (!File.Exists(remappedDllPath))
+                {
+                    throw new FileNotFoundException($"未找到隔离后的 AEE 库：{remappedDllPath}");
+                }
                 return;
             }
 
             foreach (var dll in Directory.GetFiles(sayDllDir, "*.dll"))
             {
+                var fileName = Path.GetFileName(dll); // 当前文件名
+
+                if (fileName.Equals(OriginalDllFileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    AppLogger.Info($"跳过预加载原始 AEE 库以避免与唤醒模块冲突：{dll}");
+                    continue;
+                }
                 var handle = WinNative.LoadLibrary(dll);             // 预加载，避免二级依赖找不到；记录加载句柄
                 if (handle == IntPtr.Zero)
                 {
@@ -51,10 +64,10 @@ namespace WpfVideoPet.xunfei
         }
 
 
-        // 【复刻：回调保持引用，防止 GC 回收】
-        private static readonly NativeMethods.AIKIT_OnOutput OutputCallback = OnOutput;
-        private static readonly NativeMethods.AIKIT_OnEvent EventCallback = OnEvent;
-        private static readonly NativeMethods.AIKIT_OnError ErrorCallback = OnError;
+         // 【复刻：回调保持引用，防止 GC 回收】
+        private static readonly NativeMethods.AIKIT_OnOutput OutputCallback = OnOutput; // 输出回调
+        private static readonly NativeMethods.AIKIT_OnEvent EventCallback = OnEvent; // 事件回调
+        private static readonly NativeMethods.AIKIT_OnError ErrorCallback = OnError; // 错误回调
 
         // 【复刻：结束事件】
         private static readonly ManualResetEventSlim TtsFinishedEvent = new(false);
@@ -68,7 +81,7 @@ namespace WpfVideoPet.xunfei
         private static string WavOutputPathAbs => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SayDLL", WavOutputPath);
 
         // 【新增：防重复初始化标记】
-        private static int _inited = 0;
+        private static int _inited = 0; // 初始化标记
 
         /// <summary>
         ///  新增 Init，目的：提供给外部显式初始化，严格复刻初始化参数】
@@ -206,6 +219,44 @@ namespace WpfVideoPet.xunfei
             }
         }
 
+        /// <summary>
+        /// 为 TTS 模块生成隔离的 AEE 原生库副本，避免与唤醒模块的同名 DLL 冲突。
+        /// </summary>
+        /// <param name="sayDllDir">SayDLL 目录的绝对路径。</param>
+        /// <returns>隔离副本的完整路径。</returns>
+        private static string PrepareIsolatedAeeLibrary(string sayDllDir)
+        {
+            var sourcePath = Path.Combine(sayDllDir, OriginalDllFileName); // 源 DLL 路径
+            var targetPath = Path.Combine(sayDllDir, RemappedDllFileName); // 目标 DLL 路径
+
+            if (!File.Exists(sourcePath))
+            {
+                throw new FileNotFoundException($"未找到原始的 AEE 库：{sourcePath}");
+            }
+
+            var needCopy = true; // 是否需要复制副本
+
+            if (File.Exists(targetPath))
+            {
+                var sourceInfo = new FileInfo(sourcePath); // 源文件信息
+                var targetInfo = new FileInfo(targetPath); // 目标文件信息
+                needCopy = sourceInfo.Length != targetInfo.Length || sourceInfo.LastWriteTimeUtc != targetInfo.LastWriteTimeUtc;
+            }
+
+            if (needCopy)
+            {
+                File.Copy(sourcePath, targetPath, true);
+                AppLogger.Info($"已生成 TTS 隔离副本：{targetPath}");
+            }
+            else
+            {
+                AppLogger.Info($"沿用已存在的 TTS 隔离副本：{targetPath}");
+            }
+
+            return targetPath;
+        }
+
+
         // ================== 以下为复刻的私有辅助逻辑与回调 ==================
 
         private static void AddStringParam(IntPtr builder, string key, string value)
@@ -291,7 +342,7 @@ namespace WpfVideoPet.xunfei
         /// </summary>
         private static class NativeMethods
         {
-            private const string DllName = "AEE_lib.dll"; // 资源/DLL 均放 Debug 下
+            private const string DllName = RemappedDllFileName; // 资源/DLL 均放 Debug 下
 
             internal enum BuilderType { Param = 0, Data = 1 }
             internal enum BuilderDataType { Text = 0, Audio = 1, Image = 2, Video = 3 }
