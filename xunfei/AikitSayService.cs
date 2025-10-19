@@ -1,45 +1,55 @@
-﻿// 【修改点-1：完善 using，目的：引入所需命名空间，保持精简但可编译】 
-using System;
+﻿using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using WpfVideoPet;
 
 namespace WpfVideoPet.xunfei
 {
-    /// <summary>
-    /// 【修改点-2：新增服务类，目的：提供可复用的 TTS 服务给其他类调用；严格复刻参数/流程】
-    /// 说明：
-    /// 1）Init() 仅初始化一次；Uninit() 手动逆初始化；
-    /// 2）Speak(text, voiceName, abilityId) 复刻 RunTtsFlow 逻辑；
-    /// 3）资源与 DLL 默认位于 Debug 目录（AppDomain.CurrentDomain.BaseDirectory），不做自动复制；
-    /// </summary>
+
+    //  文字转语音
+    //  统一子目录名为 SayDLL：将原生 DLL、resource 资源与输出/工作目录切到该目录（最小修改，集中管理）禁止加入全局DLL路径防止污染
     public sealed class AikitSayService
     {
 
-        //  修改DLL加载路径为SayDLL
+        //  预加载 SayDLL 目录中的所有原生库，避免污染全局搜索路径
         private static class WinNative
         {
             [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
-            internal static extern bool SetDllDirectory(string lpPathName);
-
-            [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
             internal static extern IntPtr LoadLibrary(string lpFileName);
         }
-        //  修改DLL加载路径为SayDLL
+        //  预加载原生库，确保独立运行
 
-        private static void EnsureNativeDllSearchPath(string sayDllDir, bool preloadAll = true)
+        /// <summary>
+        /// 预加载 SayDLL 子目录中的原生库，确保无需修改全局 DLL 搜索路径也能解析依赖。
+        /// </summary>
+        /// <param name="sayDllDir">SayDLL 目录的绝对路径。</param>
+        /// <param name="preloadAll">是否预加载目录下的全部 DLL。</param>
+        private static void EnsureNativeLibrariesLoaded(string sayDllDir, bool preloadAll = true)
         {
             if (!Directory.Exists(sayDllDir)) throw new DirectoryNotFoundException($"未找到 SayDLL 目录：{sayDllDir}");
-            WinNative.SetDllDirectory(sayDllDir);                    // 将 SayDLL 加入本进程 DLL 搜索路径
-            if (preloadAll)
+
+            if (!preloadAll)
             {
-                foreach (var dll in Directory.GetFiles(sayDllDir, "*.dll"))
+                return;
+            }
+
+            foreach (var dll in Directory.GetFiles(sayDllDir, "*.dll"))
+            {
+                var handle = WinNative.LoadLibrary(dll);             // 预加载，避免二级依赖找不到；记录加载句柄
+                if (handle == IntPtr.Zero)
                 {
-                    WinNative.LoadLibrary(dll);                      // 预加载，避免二级依赖找不到
+                    var errorCode = Marshal.GetLastPInvokeError();
+                    AppLogger.Warn($"加载 SayDLL 目录下的原生库失败: {dll}，错误码: {errorCode}");
+                }
+                else
+                {
+                    AppLogger.Info($"已加载 SayDLL 原生库: {dll}");
                 }
             }
         }
+
 
         // 【复刻：回调保持引用，防止 GC 回收】
         private static readonly NativeMethods.AIKIT_OnOutput OutputCallback = OnOutput;
@@ -61,17 +71,18 @@ namespace WpfVideoPet.xunfei
         private static int _inited = 0;
 
         /// <summary>
-        /// 【修改点-3：新增 Init，目的：提供给外部显式初始化，严格复刻初始化参数】
+        ///  新增 Init，目的：提供给外部显式初始化，严格复刻初始化参数】
         /// </summary>
         public void Init()
         {
             if (Interlocked.CompareExchange(ref _inited, 1, 0) == 1) return;
 
-            // 【修改点-8：新增并优先设置 DLL 搜索目录；目的：确保 AEE_lib.dll 及依赖从 SayDLL 解析】
+            //  新增并优先设置 DLL 搜索目录；目的：确保 AEE_lib.dll 及依赖从 SayDLL 解析】
             var sayDllDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SayDLL");
-            EnsureNativeDllSearchPath(sayDllDir); // 必须在任何 AIKIT 调用之前执行
+            AppLogger.Info($"准备加载 SayDLL 目录原生库: {sayDllDir}");
+            EnsureNativeLibrariesLoaded(sayDllDir); // 必须在任何 AIKIT 调用之前执行
 
-            // 【修改点-9：日志路径切到 SayDLL；目的：日志集中在同一目录便于排查】
+            // 日志路径切到 SayDLL；目的：日志集中在同一目录便于排查】
             var logPath = Path.Combine(sayDllDir, "log.txt");
             var logResult = NativeMethods.AIKIT_SetLogInfo(0, 2, logPath);
 

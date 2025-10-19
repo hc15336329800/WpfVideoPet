@@ -35,9 +35,9 @@ namespace WpfVideoPet.xunfei
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate void AD_OnError(nint abilityId, int errCode, nint desc);
 
-        // [新增] 将自定义目录加入 Windows DLL 搜索路径（最小修改）
+        // 预加载原生库，避免修改全局 DLL 搜索路径
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern bool SetDllDirectory(string lpPathName);
+        private static extern nint LoadLibraryW(string lpLibFileName);
 
 
         [DllImport("AikitDll.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
@@ -73,7 +73,6 @@ namespace WpfVideoPet.xunfei
         private bool _disposed;
         private bool _initialized;
         private bool _sessionStarted;
-        private string? _originalWorkingDirectory;
         private string? _workDir;
         private string? _resDir;
         private string? _keywordPath;
@@ -84,7 +83,7 @@ namespace WpfVideoPet.xunfei
         private EventHandler<WaveInEventArgs>? _dataAvailableHandler;
         private EventHandler<StoppedEventArgs>? _recordingStoppedHandler;
 
-        // [新增] 统一子目录名为 WakeDLL：将原生 DLL、resource 资源与输出/工作目录切到该目录（最小修改，集中管理）
+        //  统一子目录名为 WakeDLL：将原生 DLL、resource 资源与输出/工作目录切到该目录（最小修改，集中管理）
         private const string SdkSubFolder = "WakeDLL";
 
         /// <summary>
@@ -202,36 +201,20 @@ namespace WpfVideoPet.xunfei
             // [修改] 以 WakeDLL 为目标目录，校验/复制原生依赖与 resource
             var keywordFullPath = EnsureNativeDependencies(wakeDir);
 
-            // [修改] 切换进程工作目录到 WakeDLL，确保 P/Invoke 与相对路径均以此为根
-            _originalWorkingDirectory = Directory.GetCurrentDirectory();
-            Directory.SetCurrentDirectory(wakeDir);
-
-
-            ///// 目的：把 WakeDLL 正式加入本机库搜索目录与 PATH，确保 AikitDll 及其二级依赖可被装载。/////
-            _originalWorkingDirectory = Directory.GetCurrentDirectory();
-            Directory.SetCurrentDirectory(wakeDir);
-
-            // [新增] 将 WakeDLL 加入 DLL 搜索路径（.NET 8 默认不搜索当前子目录）
-            SetDllDirectory(wakeDir);
-            // [新增] 追加到 PATH，兼容少数依赖用 PATH 解析的情况
-            var oldPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-            if (!oldPath.Split(';').Any(p => string.Equals(p, wakeDir, StringComparison.OrdinalIgnoreCase)))
-            {
-                Environment.SetEnvironmentVariable("PATH", wakeDir + ";" + oldPath);
-            }
+            AppLogger.Info("开始预加载 WakeDLL 原生库，避免污染全局搜索路径。");
+            PreloadNativeLibraries(wakeDir);
             ///////////////////////////////////////////////////////////////////////////////////////////////
 
-
             // [修改] workDir/resDir 绑定当前（WakeDLL）目录
-            _workDir = ".";
-            _resDir = Path.Combine(".", "resource");
+            _workDir = wakeDir;
+            _resDir = Path.Combine(wakeDir, "resource");
 
-            // [保持原逻辑] 非 ASCII 时仍回退到 .\keyword.txt（遵循你原有路径策略，最小改动）
+            // [保持原逻辑] 非 ASCII 时仍回退到 WakeDLL\keyword.txt（遵循原策略，最小改动）
             _keywordPath = IsPureAscii(keywordFullPath)
                ? keywordFullPath
-               : Path.Combine(".", "keyword.txt");
+               : Path.Combine(wakeDir, "keyword.txt");
 
-            AppLogger.Info($"初始化 Aikit 唤醒服务，工作目录: {Path.GetFullPath(_workDir)}, 资源目录: {Path.GetFullPath(_resDir)}, 唤醒词文件: {Path.GetFullPath(_keywordPath)}");
+            AppLogger.Info($"初始化 Aikit 唤醒服务，工作目录: {_workDir}, 资源目录: {_resDir}, 唤醒词文件: {_keywordPath}");
 
             var initResult = AD_Init(AppId, ApiKey, ApiSecret, _workDir, _resDir);
             AppLogger.Info($"AD_Init 返回代码: {initResult}");
@@ -282,6 +265,33 @@ namespace WpfVideoPet.xunfei
 
             _sessionStarted = true;
             AppLogger.Info("Aikit 唤醒引擎初始化完成，等待麦克风数据。");
+        }
+
+        /// <summary>
+        /// 预加载 WakeDLL 子目录中的所有原生 DLL，确保无需修改全局搜索路径也能解析依赖。
+        /// </summary>
+        /// <param name="wakeDir">WakeDLL 目录的绝对路径。</param>
+        private static void PreloadNativeLibraries(string wakeDir)
+        {
+            if (!Directory.Exists(wakeDir))
+            {
+                AppLogger.Warn($"WakeDLL 目录不存在，跳过原生库预加载：{wakeDir}");
+                return;
+            }
+
+            foreach (var dllPath in Directory.GetFiles(wakeDir, "*.dll"))
+            {
+                var handle = LoadLibraryW(dllPath); // 记录加载句柄
+                if (handle == IntPtr.Zero)
+                {
+                    var errorCode = Marshal.GetLastPInvokeError();
+                    AppLogger.Warn($"加载 WakeDLL 原生库失败: {dllPath}，错误码: {errorCode}");
+                }
+                else
+                {
+                    AppLogger.Info($"已加载 WakeDLL 原生库: {dllPath}");
+                }
+            }
         }
 
         /// <summary>
@@ -798,22 +808,6 @@ namespace WpfVideoPet.xunfei
             catch (Exception ex)
             {
                 AppLogger.Warn($"释放 Aikit 引擎失败：{ex.Message}");
-            }
-
-            if (!string.IsNullOrWhiteSpace(_originalWorkingDirectory))
-            {
-                try
-                {
-                    Directory.SetCurrentDirectory(_originalWorkingDirectory);
-                }
-                catch (Exception ex)
-                {
-                    AppLogger.Warn($"恢复工作目录失败：{ex.Message}");
-                }
-                finally
-                {
-                    _originalWorkingDirectory = null;
-                }
             }
         }
         /// <summary>
