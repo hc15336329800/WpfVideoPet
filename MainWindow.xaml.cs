@@ -4,12 +4,10 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
-using System.Speech.Recognition;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -29,8 +27,6 @@ namespace WpfVideoPet
         private double _angle;
         private OverlayWindow? _overlay;
         private VideoCallWindow? _videoCallWindow;
-        private SpeechRecognitionEngine? _speechRecognizer;
-        private const double WakeWordConfidenceThreshold = 0.45;
         private readonly DispatcherTimer _volumeRestoreTimer;
         /// <summary>
         /// 控制语音识别提示自动隐藏的计时器，避免识别文本长时间停留。
@@ -157,7 +153,7 @@ namespace WpfVideoPet
             };
             _transcriptionResetTimer.Tick += (_, __) => ResetTranscriptionDisplay();
 
-            InitializeSpeechRecognition();
+            AppLogger.Info("已移除 System.Speech 蓝猫一号的 唤醒逻辑，避免与讯飞唤醒功能冲突。");
             InitializeMqttService();
             _bobaoService = BuildBobaoService(startupDirectory);
             if (_bobaoService == null)
@@ -330,49 +326,7 @@ namespace WpfVideoPet
                 _player.Mute = !_player.Mute;
             }
         }
-
-        private void InitializeSpeechRecognition()
-        {
-            try
-            {
-                _speechRecognizer = new SpeechRecognitionEngine(new CultureInfo("zh-CN"));
-
-                var choices = new Choices("蓝猫一号");
-                var builder = new GrammarBuilder { Culture = _speechRecognizer.RecognizerInfo.Culture };
-                builder.Append(choices);
-
-                var grammar = new Grammar(builder);
-                _speechRecognizer.LoadGrammar(grammar);
-
-                _speechRecognizer.SpeechDetected += SpeechRecognizerOnSpeechDetected;
-                _speechRecognizer.SpeechRecognitionRejected += SpeechRecognizerOnSpeechRecognitionRejected;
-                _speechRecognizer.RecognizeCompleted += SpeechRecognizerOnRecognizeCompleted;
-                _speechRecognizer.SpeechRecognized += SpeechRecognizerOnSpeechRecognized;
-                _speechRecognizer.SetInputToDefaultAudioDevice();
-                _speechRecognizer.RecognizeAsync(RecognizeMode.Multiple);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"语音识别初始化失败: {ex.Message}", "语音识别", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
-        }
-
-        private void SpeechRecognizerOnSpeechRecognized(object? sender, SpeechRecognizedEventArgs e)
-        {
-            if (e.Result.Confidence < WakeWordConfidenceThreshold)
-            {
-                Dispatcher.BeginInvoke(new Action(ScheduleVolumeRestore));
-                return;
-            }
-
-            if (IsWakePhrase(e.Result.Text))
-            {
-                Dispatcher.BeginInvoke(new Action(ShowVideoCallWindow));
-            }
-
-            Dispatcher.BeginInvoke(new Action(ScheduleVolumeRestore));
-        }
-
+  
         private void LoadWeatherMock()
         {
             _overlay?.UpdateWeather("城市: 示例市", "天气: 多云转晴，西北风3级", "气温: 22℃");
@@ -396,16 +350,6 @@ namespace WpfVideoPet
             _player?.Dispose();
             _libVlc?.Dispose();
 
-            if (_speechRecognizer != null)
-            {
-                _speechRecognizer.SpeechRecognized -= SpeechRecognizerOnSpeechRecognized;
-                _speechRecognizer.SpeechDetected -= SpeechRecognizerOnSpeechDetected;
-                _speechRecognizer.SpeechRecognitionRejected -= SpeechRecognizerOnSpeechRecognitionRejected;
-                _speechRecognizer.RecognizeCompleted -= SpeechRecognizerOnRecognizeCompleted;
-                _speechRecognizer.RecognizeAsyncCancel();
-                _speechRecognizer.Dispose();
-            }
-
             _volumeRestoreTimer.Stop();
             _transcriptionResetTimer.Stop();
         }
@@ -419,22 +363,6 @@ namespace WpfVideoPet
             _overlay.Top = this.Top;
             _overlay.Width = this.ActualWidth;
             _overlay.Height = this.ActualHeight;
-        }
-
-        private void SpeechRecognizerOnSpeechDetected(object? sender, SpeechDetectedEventArgs e)
-        {
-            // 是否压低播放音量由配置控制。
-            BeginAudioDucking();
-        }
-
-        private void SpeechRecognizerOnSpeechRecognitionRejected(object? sender, SpeechRecognitionRejectedEventArgs e)
-        {
-            Dispatcher.BeginInvoke(new Action(ScheduleVolumeRestore));
-        }
-
-        private void SpeechRecognizerOnRecognizeCompleted(object? sender, RecognizeCompletedEventArgs e)
-        {
-            Dispatcher.BeginInvoke(new Action(ScheduleVolumeRestore));
         }
 
 
@@ -456,70 +384,6 @@ namespace WpfVideoPet
         //    }));
         //}
 
-
-        private void BeginAudioDucking()
-        {
-            Dispatcher.BeginInvoke(new Action(() =>
-            {
-                if (!_audioDuckingConfig.Enabled)
-                {
-                    return;
-                }
-
-                _volumeRestoreTimer.Stop();
-
-                if (!_isDuckingAudio)
-                {
-                    _isDuckingAudio = true;
-                    var duckedVolume = Math.Max(5, _userPreferredVolume / 4);
-                    SetPlayerVolume(duckedVolume, updateUserPreferred: false);
-                }
-
-                ScheduleVolumeRestore();
-            }));
-        }
-
-        private static bool IsWakePhrase(string? text)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return false;
-            }
-
-            var normalized = NormalizeWakeText(text);
-            if (string.Equals(normalized, "蓝猫一号", StringComparison.Ordinal))
-            {
-                return true;
-            }
-
-            return string.Equals(normalized, "蓝猫1号", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static string NormalizeWakeText(string text)
-        {
-            var builder = new StringBuilder(text.Length);
-            foreach (var ch in text)
-            {
-                if (char.IsWhiteSpace(ch) || char.IsControl(ch) || char.IsPunctuation(ch))
-                {
-                    continue;
-                }
-
-                if (char.GetUnicodeCategory(ch) == UnicodeCategory.DecimalDigitNumber)
-                {
-                    var numeric = (int)char.GetNumericValue(ch);
-                    if (numeric >= 0)
-                    {
-                        builder.Append(numeric);
-                        continue;
-                    }
-                }
-
-                builder.Append(ch);
-            }
-
-            return builder.ToString();
-        }
 
         private void ScheduleVolumeRestore()
         {
