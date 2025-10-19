@@ -19,13 +19,21 @@
 	<!-- 希望少维护清单，也可以直接把 DLL\ 下面的所有文件都复制过去：-->
 	<ItemGroup>
 	  <Compile Remove="DLL - 复制\**" />
+	  <Compile Remove="DLL\**" />
 	  <Compile Remove="doc\**" />
+	  <Compile Remove="讯飞文字合成语音例子\**" />
 	  <EmbeddedResource Remove="DLL - 复制\**" />
+	  <EmbeddedResource Remove="DLL\**" />
 	  <EmbeddedResource Remove="doc\**" />
+	  <EmbeddedResource Remove="讯飞文字合成语音例子\**" />
 	  <None Remove="DLL - 复制\**" />
+	  <None Remove="DLL\**" />
 	  <None Remove="doc\**" />
+	  <None Remove="讯飞文字合成语音例子\**" />
 	  <Page Remove="DLL - 复制\**" />
+	  <Page Remove="DLL\**" />
 	  <Page Remove="doc\**" />
+	  <Page Remove="讯飞文字合成语音例子\**" />
 	</ItemGroup>
 
  
@@ -57,10 +65,6 @@
                 <None Update="config\aikitbobao.appsettings.json">
                         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
                 </None>
-        </ItemGroup>
-
-        <ItemGroup>
-          <Folder Include="讯飞文字合成语音例子\" />
         </ItemGroup>
 
 

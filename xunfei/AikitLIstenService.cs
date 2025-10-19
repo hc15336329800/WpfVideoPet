@@ -12,15 +12,15 @@ using NAudio.Wave;
 namespace WpfVideoPet.xunfei
 {
     /// <summary>
-    /// 负责驱动麦克风采集与讯飞实时语音识别的服务，基于控制台 Demo 的逻辑封装。
+    /// 负责驱动麦克风采集与讯飞实时语音识别的服务，识别语音并转为文字。 在线API
     /// </summary>
-    public sealed class AikitBobaoService : IDisposable
+    public sealed class AikitLIstenService : IDisposable
     {
         private const int StatusFirstFrame = 0;
         private const int StatusContinueFrame = 1;
         private const int StatusLastFrame = 2;
 
-        private readonly AikitBobaoSettings _settings;
+        private readonly AikitListenSettings _settings;
          private bool _disposed;
          private ClientWebSocket? _webSocket;
         /// <summary>
@@ -46,7 +46,7 @@ namespace WpfVideoPet.xunfei
         /// 构造函数，注入基础配置。
         /// </summary>
         /// <param name="settings">包含讯飞接口鉴权信息的配置对象。</param>
-        public AikitBobaoService(AikitBobaoSettings settings)
+        public AikitLIstenService(AikitListenSettings settings)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         }
@@ -586,7 +586,7 @@ namespace WpfVideoPet.xunfei
         {
             if (_disposed)
             {
-                throw new ObjectDisposedException(nameof(AikitBobaoService));
+                throw new ObjectDisposedException(nameof(AikitLIstenService));
             }
         }
     }

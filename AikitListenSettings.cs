@@ -4,9 +4,9 @@ using System.Text.Json;
 namespace WpfVideoPet
 {
     /// <summary>
-    /// 讯飞语音识别播报服务的基础配置，负责承载接口地址与鉴权信息。
+    /// 讯飞识别语音并转为文字。 在线API，负责承载接口地址与鉴权信息。
     /// </summary>
-    public sealed class AikitBobaoSettings
+    public sealed class AikitListenSettings
     {
         /// <summary>
         /// 讯飞接口的 WebSocket 地址，例如 <c>wss://iat-api.xfyun.cn/v2/iat</c>。
@@ -32,10 +32,10 @@ namespace WpfVideoPet
         /// 从 JSON 配置文件加载播报设置，若文件不存在或字段缺失则抛出异常。
         /// </summary>
         /// <param name="filePath">配置文件的绝对路径。</param>
-        /// <returns>加载完成的 <see cref="AikitBobaoSettings"/> 实例。</returns>
+        /// <returns>加载完成的 <see cref="AikitListenSettings"/> 实例。</returns>
         /// <exception cref="FileNotFoundException">当配置文件不存在时抛出。</exception>
         /// <exception cref="InvalidOperationException">当配置内容不完整时抛出。</exception>
-        public static AikitBobaoSettings Load(string filePath)
+        public static AikitListenSettings Load(string filePath)
         {
             if (!File.Exists(filePath))
             {
@@ -60,7 +60,7 @@ namespace WpfVideoPet
                 throw new InvalidOperationException("Aikit 播报配置不完整，请检查 HostUrl、ApiKey、ApiSecret 与 AppId。");
             }
 
-            return new AikitBobaoSettings
+            return new AikitListenSettings
             {
                 HostUrl = hostUrl,
                 ApiKey = apiKey,

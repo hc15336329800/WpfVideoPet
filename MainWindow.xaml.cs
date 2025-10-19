@@ -59,7 +59,7 @@ namespace WpfVideoPet
         /// <summary>
         /// 语音播报服务实例，用于进行实时转写。
         /// </summary>
-        private readonly AikitBobaoService? _bobaoService;
+        private readonly AikitLIstenService? _bobaoService;
         /// <summary>
         /// 控制语音识别任务状态的锁对象。
         /// </summary>
@@ -69,9 +69,30 @@ namespace WpfVideoPet
         /// </summary>
         private CancellationTokenSource? _speechRecognitionCts;
 
+        // 构造函数
         public MainWindow()
         {
             InitializeComponent();
+
+            // 测试文字转语音
+            // 【一次性测试：不保留实例，不影响现有结构】
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    var svc = new AikitSayService();
+                    svc.Init();
+                    svc.Speak("这是一次测试播报，系统就绪。"); // 想换文案可改这里
+                    svc.Uninit();
+                }
+                catch (Exception ex)
+                {
+                    // 可选：如果你有 AppLogger
+                    AppLogger.Info($"TTS 测试失败：{ex.Message}");
+                }
+
+
+            });
             _appConfig = AppConfig.Load(null);
             _audioDuckingConfig = _appConfig.AudioDucking;
 
@@ -146,6 +167,10 @@ namespace WpfVideoPet
 
             _wakeService = new AikitWakeService(_appConfig.Wake.SdkDirectory);
             InitializeWakeService();
+
+
+
+
         }
 
 
@@ -1291,14 +1316,14 @@ namespace WpfVideoPet
         /// </summary>
         /// <param name="baseDirectory">应用根目录，用于定位配置文件。</param>
         /// <returns>初始化完成的服务实例或 null。</returns>
-        private AikitBobaoService? BuildBobaoService(string baseDirectory)
+        private AikitLIstenService? BuildBobaoService(string baseDirectory)
         {
             try
             {
                 var configPath = Path.Combine(baseDirectory, "config", "aikitbobao.appsettings.json");
                 AppLogger.Info($"准备从配置路径加载讯飞播报设置: {configPath}");
-                var settings = AikitBobaoSettings.Load(configPath);
-                var service = new AikitBobaoService(settings);
+                var settings = AikitListenSettings.Load(configPath);
+                var service = new AikitLIstenService(settings);
                 service.InterimResultReceived += OnBobaoInterimResult;
                 service.RecognitionCompleted += OnBobaoRecognitionCompleted;
                 service.RecognitionFailed += OnBobaoRecognitionFailed;

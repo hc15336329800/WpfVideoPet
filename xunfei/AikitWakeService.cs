@@ -35,6 +35,11 @@ namespace WpfVideoPet.xunfei
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate void AD_OnError(nint abilityId, int errCode, nint desc);
 
+        // [新增] 将自定义目录加入 Windows DLL 搜索路径（最小修改）
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool SetDllDirectory(string lpPathName);
+
+
         [DllImport("AikitDll.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
         private static extern int AD_Init(string appId, string apiKey, string apiSecret, string workDir, string resDir);
 
@@ -78,6 +83,9 @@ namespace WpfVideoPet.xunfei
         private AD_OnError? _errorCallback;
         private EventHandler<WaveInEventArgs>? _dataAvailableHandler;
         private EventHandler<StoppedEventArgs>? _recordingStoppedHandler;
+
+        // [新增] 统一子目录名为 WakeDLL：将原生 DLL、resource 资源与输出/工作目录切到该目录（最小修改，集中管理）
+        private const string SdkSubFolder = "WakeDLL";
 
         /// <summary>
         /// 初始化服务，可传入包含完整 SDK 的目录。
@@ -174,35 +182,57 @@ namespace WpfVideoPet.xunfei
                 _initialized = false;
             }
         }
-      
-        
+
+
         /// <summary>
         /// 完成原生唤醒引擎的初始化，包括依赖复制、回调注册与会话启动。
         /// </summary>
         private void InitializeEngine()
         {
-            var baseDirectory = AppContext.BaseDirectory;
-            if (string.IsNullOrWhiteSpace(baseDirectory))
-            {
-                baseDirectory = Directory.GetCurrentDirectory();
-            }
-            
-            AppLogger.Info($"Aikit 唤醒服务原生目录: {baseDirectory}");
+            // [修改] 统一将原生加载目录/资源目录/输出目录切换到 WakeDLL 子目录
+            var appBase = AppContext.BaseDirectory;
+            if (string.IsNullOrWhiteSpace(appBase)) appBase = Directory.GetCurrentDirectory();
 
-            var keywordFullPath = EnsureNativeDependencies(baseDirectory);
+            // [新增] 目标 SDK 根目录：...\bin\Debug\net8.0-windows\WakeDLL
+            var wakeDir = Path.Combine(appBase, SdkSubFolder);
+            Directory.CreateDirectory(wakeDir); // 确保目录存在
 
+            AppLogger.Info($"Aikit 唤醒服务原生目录: {wakeDir}");
+
+            // [修改] 以 WakeDLL 为目标目录，校验/复制原生依赖与 resource
+            var keywordFullPath = EnsureNativeDependencies(wakeDir);
+
+            // [修改] 切换进程工作目录到 WakeDLL，确保 P/Invoke 与相对路径均以此为根
             _originalWorkingDirectory = Directory.GetCurrentDirectory();
-            Directory.SetCurrentDirectory(baseDirectory);
+            Directory.SetCurrentDirectory(wakeDir);
 
+
+            ///// 目的：把 WakeDLL 正式加入本机库搜索目录与 PATH，确保 AikitDll 及其二级依赖可被装载。/////
+            _originalWorkingDirectory = Directory.GetCurrentDirectory();
+            Directory.SetCurrentDirectory(wakeDir);
+
+            // [新增] 将 WakeDLL 加入 DLL 搜索路径（.NET 8 默认不搜索当前子目录）
+            SetDllDirectory(wakeDir);
+            // [新增] 追加到 PATH，兼容少数依赖用 PATH 解析的情况
+            var oldPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+            if (!oldPath.Split(';').Any(p => string.Equals(p, wakeDir, StringComparison.OrdinalIgnoreCase)))
+            {
+                Environment.SetEnvironmentVariable("PATH", wakeDir + ";" + oldPath);
+            }
+            ///////////////////////////////////////////////////////////////////////////////////////////////
+
+
+            // [修改] workDir/resDir 绑定当前（WakeDLL）目录
             _workDir = ".";
             _resDir = Path.Combine(".", "resource");
 
-             _keywordPath = IsPureAscii(keywordFullPath)
-                ? keywordFullPath
-                : Path.Combine(".", "keyword.txt");
+            // [保持原逻辑] 非 ASCII 时仍回退到 .\keyword.txt（遵循你原有路径策略，最小改动）
+            _keywordPath = IsPureAscii(keywordFullPath)
+               ? keywordFullPath
+               : Path.Combine(".", "keyword.txt");
 
             AppLogger.Info($"初始化 Aikit 唤醒服务，工作目录: {Path.GetFullPath(_workDir)}, 资源目录: {Path.GetFullPath(_resDir)}, 唤醒词文件: {Path.GetFullPath(_keywordPath)}");
-          
+
             var initResult = AD_Init(AppId, ApiKey, ApiSecret, _workDir, _resDir);
             AppLogger.Info($"AD_Init 返回代码: {initResult}");
             if (initResult != 0)
@@ -549,7 +579,7 @@ namespace WpfVideoPet.xunfei
                 });
         }
 
-         
+
 
         /// <summary>
         /// 播放提示音提示唤醒成功，若提示音文件不存在则尝试使用蜂鸣器。
