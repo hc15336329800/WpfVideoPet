@@ -1458,7 +1458,7 @@ namespace WpfVideoPet
             {
                 EnsureAiChatWindow();
                 _aiChatWindow?.ClearAnswer();
-                _aiChatWindow?.SetQuestion("正在倾听，请说出您的问题...");
+                _aiChatWindow?.SetQuestion("蓝猫正在倾听,可以咨询法律法规相关问题 ~ ");  //初始标题
                 _aiChatWindow?.ActivateWindow();
             }));
         }
