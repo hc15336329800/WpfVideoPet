@@ -1,6 +1,10 @@
 ﻿using System;
+using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Threading;
+using WpfVideoPet.xunfei;
 
 namespace WpfVideoPet.doubao
 {
@@ -10,6 +14,10 @@ namespace WpfVideoPet.doubao
     public partial class AiChatPopupWindow : Window
     {
         private readonly DispatcherTimer _autoCloseTimer; // 弹窗自动关闭计时器
+        private readonly AikitSayService _ttsService; // 讯飞TTS服务实例
+        private readonly MediaPlayer _ttsPlayer; // 音频播放器
+        private bool _ttsInitialized; // TTS初始化标记
+        private readonly string _ttsOutputPath; // TTS音频路径
 
         /// <summary>
         /// 初始化弹窗并配置自动关闭计时器。
@@ -19,6 +27,10 @@ namespace WpfVideoPet.doubao
             InitializeComponent();
             _autoCloseTimer = new DispatcherTimer();
             _autoCloseTimer.Tick += OnAutoCloseTimerTick;
+            _ttsService = new AikitSayService();
+            _ttsPlayer = new MediaPlayer();
+            _ttsOutputPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SayDLL", "OutPut.wav");
+            InitializeTtsService();
             AppLogger.Info("AI 问答弹窗已初始化，等待语音内容。");
         }
 
@@ -122,6 +134,133 @@ namespace WpfVideoPet.doubao
             _autoCloseTimer.Stop();
             AppLogger.Info("AI 问答弹窗自动关闭计时到期，关闭窗口。");
             Close();
+        }
+        /// <summary>
+        /// 触发讯飞文字转语音服务并在音频播放完成后启动关闭流程。
+        /// </summary>
+        /// <param name="answer">豆包返回的完整回答文本。</param>
+        public async Task HandleFinalAnswerAsync(string answer)
+        {
+            StopAutoCloseCountdown();
+            var sanitizedAnswer = string.IsNullOrWhiteSpace(answer) ? string.Empty : answer.Trim();
+            AppLogger.Info("AI 问答弹窗收到完整回答，准备执行TTS播报流程。");
+
+            if (string.IsNullOrEmpty(sanitizedAnswer))
+            {
+                AppLogger.Warn("豆包回答为空，跳过TTS播报并直接启动关闭计时。");
+                BeginAutoCloseCountdown(TimeSpan.FromSeconds(2));
+                return;
+            }
+
+            EnsureTtsService();
+
+            if (!_ttsInitialized)
+            {
+                AppLogger.Warn("讯飞TTS服务未初始化成功，无法播报，将直接进入关闭计时。");
+                BeginAutoCloseCountdown(TimeSpan.FromSeconds(2));
+                return;
+            }
+
+            try
+            {
+                await Task.Run(() =>
+                {
+                    AppLogger.Info("开始调用讯飞TTS生成音频文件。");
+                    _ttsService.Speak(sanitizedAnswer);
+                });
+
+                await PlayTtsAudioAsync();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, $"TTS播报流程出现异常: {ex.Message}");
+            }
+            finally
+            {
+                BeginAutoCloseCountdown(TimeSpan.FromSeconds(2));
+            }
+        }
+
+        /// <summary>
+        /// 初始化讯飞文字转语音服务，确保依赖库与回调预先绑定。
+        /// </summary>
+        private void InitializeTtsService()
+        {
+            try
+            {
+                _ttsService.Init();
+                _ttsInitialized = true;
+                AppLogger.Info("讯飞TTS服务初始化成功。");
+            }
+            catch (Exception ex)
+            {
+                _ttsInitialized = false;
+                AppLogger.Error(ex, $"讯飞TTS服务初始化失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 在需要播报时再次确认TTS服务状态，必要时尝试重新初始化。
+        /// </summary>
+        private void EnsureTtsService()
+        {
+            if (_ttsInitialized)
+            {
+                return;
+            }
+
+            AppLogger.Warn("检测到TTS服务未就绪，尝试重新初始化。");
+            InitializeTtsService();
+        }
+
+        /// <summary>
+        /// 负责播放由讯飞TTS生成的音频文件，并在播放完成后返回。
+        /// </summary>
+        private async Task PlayTtsAudioAsync()
+        {
+            if (!File.Exists(_ttsOutputPath))
+            {
+                AppLogger.Warn($"未找到TTS输出文件: {_ttsOutputPath}");
+                return;
+            }
+
+            var tcs = new TaskCompletionSource<bool>();
+
+            void CleanupHandlers()
+            {
+                _ttsPlayer.MediaEnded -= OnMediaEnded;
+                _ttsPlayer.MediaFailed -= OnMediaFailed;
+            }
+
+            void OnMediaEnded(object? _, EventArgs __)
+            {
+                CleanupHandlers();
+                tcs.TrySetResult(true);
+            }
+
+            void OnMediaFailed(object? _, ExceptionEventArgs args)
+            {
+                CleanupHandlers();
+                AppLogger.Error(args.ErrorException, $"播放TTS音频时发生错误: {args.ErrorException?.Message}");
+                tcs.TrySetResult(false);
+            }
+
+            _ttsPlayer.Stop();
+            _ttsPlayer.MediaEnded += OnMediaEnded;
+            _ttsPlayer.MediaFailed += OnMediaFailed;
+
+            try
+            {
+                _ttsPlayer.Open(new Uri(_ttsOutputPath));
+                _ttsPlayer.Play();
+                AppLogger.Info($"开始播放讯飞TTS音频: {_ttsOutputPath}");
+                await tcs.Task;
+                AppLogger.Info("讯飞TTS音频播放完成。");
+            }
+            finally
+            {
+                CleanupHandlers();
+            }
         }
     }
 }

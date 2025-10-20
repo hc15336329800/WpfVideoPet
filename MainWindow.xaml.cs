@@ -1558,7 +1558,7 @@ namespace WpfVideoPet
                         }));
                     }, localCts.Token).ConfigureAwait(false);
 
-                    Dispatcher.BeginInvoke(new Action(() =>
+                    Dispatcher.BeginInvoke(async () =>
                     {
                         if (!string.IsNullOrWhiteSpace(answer))
                         {
@@ -1570,8 +1570,15 @@ namespace WpfVideoPet
                         }
 
                         EnsureAiChatWindow();
-                        _aiChatWindow?.BeginAutoCloseCountdown(TimeSpan.FromSeconds(2));
-                    }));
+                        if (_aiChatWindow != null)
+                        {
+                            await _aiChatWindow.HandleFinalAnswerAsync(answer);
+                        }
+                        else
+                        {
+                            AppLogger.Warn("AI 问答弹窗实例不存在，无法执行TTS播报流程。");
+                        }
+                    });
                 }
                 catch (OperationCanceledException)
                 {
