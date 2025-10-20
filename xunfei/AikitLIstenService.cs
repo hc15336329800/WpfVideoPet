@@ -36,10 +36,11 @@ namespace WpfVideoPet.xunfei
         private TaskCompletionSource<string?>? _resultSource;
         private readonly Stopwatch _latencyStopwatch = new();
         private bool _waitingLatency;
-
-                  /// <summary>
-                  /// 控制语音识别流程串行执行的同步原语，避免上一轮尚未释放资源时返回旧结果。
-                  /// </summary>
+        // 标记是否已经触发最终识别结果事件。
+        private bool _finalResultEmitted;
+        /// <summary>
+        /// 控制语音识别流程串行执行的同步原语，避免上一轮尚未释放资源时返回旧结果。
+        /// </summary>
         private readonly SemaphoreSlim _recognitionLock = new(1, 1);
 
         /// <summary>
@@ -82,6 +83,7 @@ namespace WpfVideoPet.xunfei
 
             try
             {
+                _finalResultEmitted = false;
                 var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 _internalCts = linkedCts;
 
@@ -322,12 +324,15 @@ namespace WpfVideoPet.xunfei
                 }
 
                 string? resultText = finalText.Length > 0 ? finalText.ToString() : null;
-                if (resultText != null)
+                if (!_finalResultEmitted && resultText != null)
                 {
                     RecognitionCompleted?.Invoke(this, resultText);
                 }
 
-                _resultSource?.TrySetResult(resultText);
+                if (!_finalResultEmitted)
+                {
+                    _resultSource?.TrySetResult(resultText);
+                }
             }
         }
 
@@ -359,6 +364,10 @@ namespace WpfVideoPet.xunfei
                     resultElement.TryGetProperty("ws", out var wsArray) &&
                     wsArray.ValueKind == JsonValueKind.Array)
                 {
+                    int status = dataElement.TryGetProperty("status", out var statusElement) &&
+                               statusElement.ValueKind == JsonValueKind.Number
+                      ? statusElement.GetInt32()
+                      : StatusContinueFrame;
                     var builder = new StringBuilder();
                     foreach (var wsItem in wsArray.EnumerateArray())
                     {
@@ -375,16 +384,42 @@ namespace WpfVideoPet.xunfei
                             }
                         }
                     }
-
+                    string? currentText = null;
                     if (builder.Length > 0)
                     {
                         finalText.Append(builder);
-                        string text = finalText.ToString();
-                        InterimResultReceived?.Invoke(this, text);
+                        currentText = finalText.ToString();
+                        InterimResultReceived?.Invoke(this, currentText);
                         if (_waitingLatency && _latencyStopwatch.IsRunning)
                         {
                             _latencyStopwatch.Stop();
                             AppLogger.Info($"收到识别结果，尾包耗时: {_latencyStopwatch.ElapsedMilliseconds} ms");
+                        }
+                    }
+                    else if (finalText.Length > 0)
+                    {
+                        currentText = finalText.ToString();
+                    }
+
+                    if (status == StatusLastFrame && !_finalResultEmitted)
+                    {
+                        if (currentText != null)
+                        {
+                            AppLogger.Info("检测到讯飞识别尾包，立即触发最终识别结果事件。");
+                            _finalResultEmitted = true;
+                            RecognitionCompleted?.Invoke(this, currentText);
+                            _resultSource?.TrySetResult(currentText);
+                        }
+                        else
+                        {
+                            AppLogger.Warn("讯飞识别尾包到达但未拼接出有效文本。");
+                            _resultSource?.TrySetResult(null);
+                        }
+
+                        if (_internalCts != null && !_internalCts.IsCancellationRequested)
+                        {
+                            AppLogger.Info("尾包处理完成，准备取消内部识别令牌以加速结束。");
+                            _internalCts.Cancel();
                         }
                     }
                 }
