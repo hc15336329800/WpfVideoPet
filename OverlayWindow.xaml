@@ -35,7 +35,7 @@
                 VerticalAlignment="Bottom"
                 Margin="16"
                 Background="#00000000">
-            <!-- 叠加层 Grid：同时容纳 3D 模型和对话气泡 -->
+            <!-- 叠加层 Grid：承载 3D 模型展示区域 -->
             <Grid Width="300" Height="300">
 
                 <!-- 内层 Grid，用于放置 HelixToolkit 3D 模型视图 -->
@@ -85,35 +85,9 @@
                             </h:HelixViewport3D>
                         </Grid>
                     </Viewbox>
-
-                    <!-- 💬 对话提示气泡区域 -->
-                    <Border x:Name="NotificationBorder"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Top"
-                            Margin="-12,-80,0,0"
-                            Padding="14,10,14,12"
-                            CornerRadius="10"
-                            Background="#F0333333"
-                            Visibility="Collapsed">
-                        <!-- 对话气泡正文区域，展示唤醒提示文本。 -->
-                        <StackPanel Orientation="Vertical" MaxWidth="240">
-                            <TextBlock x:Name="TxtNotificationTitle"
-                                       Text="AI 助手"
-                                       Foreground="#FF8EE7FF"
-                                       FontSize="14"
-                                       FontWeight="Bold"
-                                       Margin="0,0,0,4"/>
-                            <TextBlock x:Name="TxtNotification"
-                                       Foreground="White"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       TextWrapping="Wrap"
-                                       TextAlignment="Left"
-                                       Text=""/>
-                        </StackPanel>
-                    </Border>
                 </Grid>
             </Grid>
         </Border>
     </Grid>
+
 </Window>
