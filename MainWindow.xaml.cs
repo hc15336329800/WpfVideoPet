@@ -1378,12 +1378,15 @@ namespace WpfVideoPet
                 }));
             }
         }
+
         /// <summary>
         /// 播报服务完成识别后展示最终结果。
         /// </summary>
         private void OnBobaoRecognitionCompleted(object? sender, string text)
         {
-            if (string.IsNullOrWhiteSpace(text))
+            var finalText = text?.Trim(); // 去除识别结果首尾空白，提升展示效果。
+
+            if (string.IsNullOrWhiteSpace(finalText))
             {
                 AppLogger.Info("语音识别完成但未返回有效文本，保持默认提示。");
                 UpdateTranscriptionDisplay("识别结束", "未识别到有效语音内容。");
@@ -1401,13 +1404,28 @@ namespace WpfVideoPet
             }
             else
             {
-                AppLogger.Info($"语音识别完成，最终文本: {text}");
-                UpdateTranscriptionDisplay("识别结果", text);
+                AppLogger.Info($"语音识别完成，最终文本: {finalText}");
+                DisplayFinalTranscriptAndMaybeStartAi(finalText!);
+            }
+        }
 
-                if (_expectAiAnswer)
-                {
-                    StartDoubaoAnswerWorkflow(text);
-                }
+        /// <summary>
+        /// 在语音识别完成后同步展示最终文本，并在需要时立即启动豆包 AI 的流式回答。
+        /// </summary>
+        /// <param name="finalText">已经过首尾空白裁剪的识别文本。</param>
+        private void DisplayFinalTranscriptAndMaybeStartAi(string finalText)
+        {
+            UpdateTranscriptionDisplay("识别结果", finalText);
+            AppLogger.Info("语音识别文本已展示，准备根据等待状态触发豆包回答流程。");
+
+            if (_expectAiAnswer)
+            {
+                AppLogger.Info("检测到当前需调度豆包回答，立即进入流式问答。");
+                StartDoubaoAnswerWorkflow(finalText);
+            }
+            else
+            {
+                AppLogger.Info("当前无需豆包回答，仅展示语音识别结果。");
             }
         }
 

@@ -22,7 +22,7 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <TextBlock Text="蓝猫一号AI助手"
+            <TextBlock Text="我在听，请提问法律法规的相关问题吧~"
                        Foreground="#FF8EE7FF"
                        FontSize="14"
                        Margin="0,0,0,4" />
