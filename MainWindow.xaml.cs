@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
+using WpfVideoPet.doubao;
 using WpfVideoPet.mqtt;
 using WpfVideoPet.xunfei;
 
@@ -64,11 +65,19 @@ namespace WpfVideoPet
         /// 当前语音识别任务对应的取消标记。
         /// </summary>
         private CancellationTokenSource? _speechRecognitionCts;
+        private readonly doubao_service_chat _doubaoService; // 豆包问答服务实例
+        private readonly object _aiChatLock = new(); // AI 问答流程同步锁
+        private CancellationTokenSource? _aiAnswerCts; // 当前豆包回答任务取消源
+        private AiChatPopupWindow? _aiChatWindow; // AI 问答弹窗引用
+        private bool _expectAiAnswer; // 标记是否需要触发豆包回答
 
         // 构造函数
         public MainWindow()
         {
             InitializeComponent();
+
+            _doubaoService = new doubao_service_chat();
+            AppLogger.Info("豆包知识库服务初始化完成，等待语音问题输入。");
 
             // 测试文字转语音
             // 【一次性测试：不保留实例，不影响现有结构】
@@ -89,6 +98,9 @@ namespace WpfVideoPet
 
 
             });
+
+
+            // 其他
             _appConfig = AppConfig.Load(null);
             _audioDuckingConfig = _appConfig.AudioDucking;
 
@@ -1203,8 +1215,25 @@ namespace WpfVideoPet
 
         private void OnWakeKeywordRecognized(object? sender, WakeKeywordEventArgs e)
         {
+            var isAiKeyword = string.Equals(e.Keyword, "小黄小黄", StringComparison.Ordinal);
+            if (isAiKeyword)
+            {
+                AppLogger.Info("识别到“小黄小黄”唤醒词，准备调度 AI 问答流程。");
+            }
+            else if (_expectAiAnswer)
+            {
+                AppLogger.Info("收到非“小黄小黄”唤醒词，重置 AI 问答等待状态。");
+            }
+
+            _expectAiAnswer = isAiKeyword;
+
             void Show()
             {
+                if (isAiKeyword)
+                {
+                    PrepareAiChatWindowForListening();
+                }
+
                 if (string.IsNullOrWhiteSpace(e.NotificationMessage))
                 {
                     return;
@@ -1233,6 +1262,7 @@ namespace WpfVideoPet
                 Dispatcher.BeginInvoke((Action)Show);
             }
         }
+
 
         /// <summary>
         /// 唤醒服务请求启动语音识别时的回调。
@@ -1327,7 +1357,6 @@ namespace WpfVideoPet
                 }
             });
         }
-
         /// <summary>
         /// 播报服务推送中间结果时更新界面。
         /// </summary>
@@ -1339,6 +1368,15 @@ namespace WpfVideoPet
             }
 
             UpdateTranscriptionDisplay("语音识别中...", text);
+
+            if (_expectAiAnswer)
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    EnsureAiChatWindow();
+                    _aiChatWindow?.SetQuestion(text);
+                }));
+            }
         }
         /// <summary>
         /// 播报服务完成识别后展示最终结果。
@@ -1349,14 +1387,29 @@ namespace WpfVideoPet
             {
                 AppLogger.Info("语音识别完成但未返回有效文本，保持默认提示。");
                 UpdateTranscriptionDisplay("识别结束", "未识别到有效语音内容。");
+
+                if (_expectAiAnswer)
+                {
+                    AppLogger.Warn("AI 问答流程因识别结果为空而终止。");
+                    ResetAiChatExpectation();
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        EnsureAiChatWindow();
+                        _aiChatWindow?.ShowError("未识别到有效语音内容。");
+                    }));
+                }
             }
             else
             {
                 AppLogger.Info($"语音识别完成，最终文本: {text}");
                 UpdateTranscriptionDisplay("识别结果", text);
+
+                if (_expectAiAnswer)
+                {
+                    StartDoubaoAnswerWorkflow(text);
+                }
             }
         }
-
 
         /// <summary>
         /// 播报服务发生异常时通知用户。
@@ -1366,6 +1419,176 @@ namespace WpfVideoPet
             AppLogger.Warn($"语音识别回调失败，返回消息: {message}");
             var content = string.IsNullOrWhiteSpace(message) ? "语音识别失败，请稍后重试。" : message;
             UpdateTranscriptionDisplay("识别失败", content);
+
+            if (_expectAiAnswer)
+            {
+                ResetAiChatExpectation();
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    EnsureAiChatWindow();
+                    _aiChatWindow?.ShowError(content);
+                }));
+            }
+        }
+
+        /// <summary>
+        /// 为语音识别阶段准备 AI 问答弹窗，提示用户可以提问。
+        /// </summary>
+        private void PrepareAiChatWindowForListening()
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                EnsureAiChatWindow();
+                _aiChatWindow?.ClearAnswer();
+                _aiChatWindow?.SetQuestion("正在倾听，请说出您的问题...");
+                _aiChatWindow?.ActivateWindow();
+            }));
+        }
+
+        /// <summary>
+        /// 创建或重新绑定 AI 问答弹窗实例，确保其生命周期受主窗口托管。
+        /// </summary>
+        private void EnsureAiChatWindow()
+        {
+            if (_aiChatWindow != null)
+            {
+                return;
+            }
+
+            _aiChatWindow = new AiChatPopupWindow
+            {
+                Owner = this,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner
+            };
+
+            _aiChatWindow.Closed += (_, _) =>
+            {
+                AppLogger.Info("AI 问答弹窗已关闭并释放引用。");
+                _aiChatWindow = null;
+            };
+
+            AppLogger.Info("AI 问答弹窗实例已创建并与主窗口绑定。");
+        }
+
+        /// <summary>
+        /// 调用豆包知识库服务处理指定问题，并在弹窗中实时展示回答内容。
+        /// </summary>
+        /// <param name="question">语音识别得到的问题文本。</param>
+        private void StartDoubaoAnswerWorkflow(string question)
+        {
+            if (string.IsNullOrWhiteSpace(question))
+            {
+                AppLogger.Warn("豆包回答流程收到空问题，终止执行。");
+                ResetAiChatExpectation();
+                return;
+            }
+
+            var normalizedQuestion = question.Trim();
+            AppLogger.Info($"启动豆包回答流程，问题: {normalizedQuestion}");
+
+            CancellationTokenSource localCts;
+            CancellationTokenSource? previousCts = null;
+
+            lock (_aiChatLock)
+            {
+                if (_aiAnswerCts != null)
+                {
+                    previousCts = _aiAnswerCts;
+                }
+
+                _aiAnswerCts = new CancellationTokenSource();
+                localCts = _aiAnswerCts;
+            }
+
+            if (previousCts != null)
+            {
+                AppLogger.Info("检测到历史豆包回答任务，正在取消以启动新的任务。");
+                try
+                {
+                    previousCts.Cancel();
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, $"取消历史豆包回答任务时发生异常: {ex.Message}");
+                }
+                finally
+                {
+                    previousCts.Dispose();
+                }
+            }
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                EnsureAiChatWindow();
+                _aiChatWindow?.ClearAnswer();
+                _aiChatWindow?.SetQuestion(normalizedQuestion);
+                _aiChatWindow?.ActivateWindow();
+            }));
+
+            ResetAiChatExpectation();
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var answer = await _doubaoService.AskAsync(normalizedQuestion, delta =>
+                    {
+                        Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            EnsureAiChatWindow();
+                            _aiChatWindow?.AppendAnswer(delta);
+                        }));
+                    }, localCts.Token).ConfigureAwait(false);
+
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(answer))
+                        {
+                            AppLogger.Info($"豆包回答流程完成，返回文本长度: {answer.Length}");
+                        }
+                        else
+                        {
+                            AppLogger.Warn("豆包回答流程完成，但返回文本为空。");
+                        }
+
+                        EnsureAiChatWindow();
+                        _aiChatWindow?.BeginAutoCloseCountdown(TimeSpan.FromSeconds(2));
+                    }));
+                }
+                catch (OperationCanceledException)
+                {
+                    AppLogger.Warn("豆包回答任务被取消。");
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, $"豆包回答流程发生异常: {ex.Message}");
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        EnsureAiChatWindow();
+                        _aiChatWindow?.ShowError(ex.Message);
+                    }));
+                }
+                finally
+                {
+                    lock (_aiChatLock)
+                    {
+                        if (ReferenceEquals(_aiAnswerCts, localCts))
+                        {
+                            _aiAnswerCts.Dispose();
+                            _aiAnswerCts = null;
+                        }
+                    }
+                }
+            });
+        }
+
+        /// <summary>
+        /// 重置 AI 问答状态，避免后续流程误判当前会话仍在进行。
+        /// </summary>
+        private void ResetAiChatExpectation()
+        {
+            _expectAiAnswer = false;
+            AppLogger.Info("AI 问答等待状态已重置。");
         }
 
         /// <summary>

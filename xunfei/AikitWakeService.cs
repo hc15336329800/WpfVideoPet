@@ -356,11 +356,11 @@ namespace WpfVideoPet.xunfei
                             AppLogger.Info("触发“小黄小黄”业务逻辑：例如播报天气或执行定制命令。");
                             notificationMessage = "已唤醒“小黄小黄”，即将为您播报定制内容。";
 
-                            // 播放默认提示音反馈用户操作，再延迟一秒启动语音转写。
+                            // 播放默认提示音反馈用户操作，再延迟0.5秒启动语音转写。
                             AppLogger.Info("播放默认唤醒提示音，告知用户已成功唤醒。");
                             PlayDing();
 
-                            AppLogger.Info("已播放提示音，将在 1 秒后触发语音识别流程。");
+                            AppLogger.Info("已播放提示音，将在 0.5 秒后触发语音识别流程。");
                             _ = Task.Run(async () =>
                             {
                                 try

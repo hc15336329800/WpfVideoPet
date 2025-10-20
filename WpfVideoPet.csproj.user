@@ -2,7 +2,10 @@
 <Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup />
   <ItemGroup>
-    <Compile Update="doubao_chat.xaml.cs">
+    <Compile Update="doubao\AiChatPopupWindow.xaml.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Update="doubao\doubao_chat_连天窗口测试.xaml.cs">
       <SubType>Code</SubType>
     </Compile>
     <Compile Update="OverlayWindow.xaml.cs">
