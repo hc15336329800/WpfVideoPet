@@ -1,7 +1,7 @@
 ﻿<Window x:Class="WpfVideoPet.OverlayWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:h="clr-namespace:HelixToolkit.Wpf;assembly=HelixToolkit.Wpf"
+        xmlns:hx="clr-namespace:HelixToolkit.Wpf.SharpDX;assembly=HelixToolkit.Wpf.SharpDX"
         AllowsTransparency="True"
         Background="Transparent"
         WindowStyle="None"
@@ -29,7 +29,6 @@
             </StackPanel>
         </Border>
 
-
         <!-- 🟥 右下角 3D 模型区域（AI 虚拟人或宠物展示区） -->
         <Border HorizontalAlignment="Right"
                 VerticalAlignment="Bottom"
@@ -37,57 +36,40 @@
                 Background="#00000000">
             <!-- 叠加层 Grid：承载 3D 模型展示区域 -->
             <Grid Width="300" Height="300">
-
-                <!-- 内层 Grid，用于放置 HelixToolkit 3D 模型视图 -->
                 <Grid HorizontalAlignment="Right"
                       VerticalAlignment="Bottom"
                       Width="300"
                       Height="300">
 
                     <!-- Viewbox 自动缩放 3D 内容至容器 -->
-                    <Viewbox Stretch="Fill"
-                             StretchDirection="Both">
+                    <Viewbox Stretch="Fill" StretchDirection="Both">
                         <Grid>
 
-                            <!-- HelixViewport3D：HelixToolkit 3D 渲染核心组件 -->
-                            <h:HelixViewport3D x:Name="PetView"
-                                               ShowFrameRate="False"
-                                               ShowViewCube="False"
-                                               ZoomExtentsWhenLoaded="True"
-                                               Background="#00FFFFFF">
-                                <h:DefaultLights/>
+                            <!-- 【修改点】DX11 视口控件（替换原 HelixViewport3D） -->
+                            <hx:Viewport3DX x:Name="PetViewDx"
+                                            ShowFrameRate="False"
+                                            EnableOrderIndependentTransparentRendering="True"
+                                            ZoomExtentsWhenLoaded="True"
+                                            Background="#00FFFFFF">
+                                <!-- 摄像机（可选，给个合理默认） -->
+                                <hx:PerspectiveCamera x:Name="Camera"
+                                                      Position="0,1.5,3.5"
+                                                      LookDirection="0,-0.5,-3.5"
+                                                      UpDirection="0,1,0"
+                                                      FieldOfView="45"/>
 
-                                <!-- 3D 模型容器 -->
-                                <ModelVisual3D>
-                                    <ModelVisual3D.Content>
-                                        <Model3DGroup x:Name="PetModel">
-                                            <AmbientLight Color="#666666"/>
-                                            <DirectionalLight Color="White" Direction="-1,-1,-2"/>
-                                            <GeometryModel3D x:Name="Cube">
-                                                <GeometryModel3D.Geometry>
-                                                    <MeshGeometry3D Positions="-0.5,-0.5,-0.5  0.5,-0.5,-0.5  0.5,0.5,-0.5 -0.5,0.5,-0.5 -0.5,-0.5,0.5  0.5,-0.5,0.5  0.5,0.5,0.5 -0.5,0.5,0.5"
-                                                                    TriangleIndices="0 1 2 0 2 3  1 5 6 1 6 2  5 4 7 5 7 6  4 0 3 4 3 7  3 2 6 3 6 7  4 5 1 4 1 0" />
-                                                </GeometryModel3D.Geometry>
-                                                <GeometryModel3D.Material>
-                                                    <DiffuseMaterial Brush="#FF01ADA8"/>
-                                                </GeometryModel3D.Material>
-                                                <GeometryModel3D.Transform>
-                                                    <RotateTransform3D>
-                                                        <RotateTransform3D.Rotation>
-                                                            <AxisAngleRotation3D x:Name="CubeRotation" Axis="0,1,0" Angle="0"/>
-                                                        </RotateTransform3D.Rotation>
-                                                    </RotateTransform3D>
-                                                </GeometryModel3D.Transform>
-                                            </GeometryModel3D>
-                                        </Model3DGroup>
-                                    </ModelVisual3D.Content>
-                                </ModelVisual3D>
-                            </h:HelixViewport3D>
+                                <!-- 灯光：方向光 + 环境光 -->
+                                <hx:DirectionalLight3D Direction="-1,-1,-2" Color="White"/>
+                                <hx:AmbientLight3D Color="#666666"/>
+
+                                <!-- 3D 模型容器（代码里向这里添加 SceneNode） -->
+                                <hx:GroupModel3D x:Name="SceneRoot"/>
+                            </hx:Viewport3DX>
+
                         </Grid>
                     </Viewbox>
                 </Grid>
             </Grid>
         </Border>
     </Grid>
-
 </Window>
