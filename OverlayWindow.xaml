@@ -45,18 +45,18 @@
                     <Viewbox Stretch="Fill" StretchDirection="Both">
                         <Grid>
 
-                            <!-- 【修改点】DX11 视口控件（替换原 HelixViewport3D） -->
                             <hx:Viewport3DX x:Name="PetViewDx"
                                             ShowFrameRate="False"
-                                            EnableOrderIndependentTransparentRendering="True"
+                                            EnableOITRendering="True"
                                             ZoomExtentsWhenLoaded="True"
                                             Background="#00FFFFFF">
-                                <!-- 摄像机（可选，给个合理默认） -->
-                                <hx:PerspectiveCamera x:Name="Camera"
-                                                      Position="0,1.5,3.5"
-                                                      LookDirection="0,-0.5,-3.5"
-                                                      UpDirection="0,1,0"
-                                                      FieldOfView="45"/>
+                                 <hx:Viewport3DX.Camera>
+                                    <hx:PerspectiveCamera x:Name="Camera"
+                                                          Position="0,1.5,3.5"
+                                                          LookDirection="0,-0.5,-3.5"
+                                                          UpDirection="0,1,0"
+                                                          FieldOfView="45"/>
+                                </hx:Viewport3DX.Camera>
 
                                 <!-- 灯光：方向光 + 环境光 -->
                                 <hx:DirectionalLight3D Direction="-1,-1,-2" Color="White"/>
