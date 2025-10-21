@@ -11,6 +11,9 @@
     <Compile Update="OverlayWindow.xaml.cs">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Update="TestMain.xaml.cs">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Update="VideoCallWindow.xaml.cs">
       <SubType>Code</SubType>
     </Compile>

@@ -39,6 +39,7 @@
  
 
 	<ItemGroup>
+		<PackageReference Include="HandyControl" Version="3.5.1" />
 		<PackageReference Include="HelixToolkit.Wpf" Version="2.27.3" />
 		<PackageReference Include="MQTTnet" Version="4.3.2" />
                 <PackageReference Include="LibVLCSharp.WPF" Version="3.9.4" />

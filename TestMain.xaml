@@ -1,0 +1,23 @@
+﻿<Page x:Class="WpfVideoPet.TestMain"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+      xmlns:local="clr-namespace:WpfVideoPet"
+      mc:Ignorable="d" 
+      d:DesignHeight="450" d:DesignWidth="800"
+      Title="TestMain">
+
+    <Grid>
+        <!-- 修改：新增触发按钮（点击后显示弹出层） -->
+        <Button x:Name="btnShow" Content="显示提示" Width="96" Height="32" HorizontalAlignment="Center" VerticalAlignment="Center" Click="btnShow_Click"/>
+
+        <!-- 修改：新增 Popup 作为弹出层；跟随按钮位置显示，点击外部自动关闭 -->
+        <Popup x:Name="popInfo" PlacementTarget="{Binding ElementName=btnShow}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+            <Border Background="#FFFFFF" CornerRadius="6" Padding="10" BorderBrush="#DDD" BorderThickness="1" Effect="{DynamicResource DropShadowEffect}">
+                <TextBlock Text="这是一个 Popover 样式的提示框" Foreground="#000"/>
+            </Border>
+        </Popup>
+    </Grid>
+
+</Page>
