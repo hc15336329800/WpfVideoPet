@@ -1,7 +1,7 @@
 ﻿<Window x:Class="WpfVideoPet.OverlayWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:hx="clr-namespace:HelixToolkit.Wpf.SharpDX;assembly=HelixToolkit.Wpf.SharpDX"
+        xmlns:hx="http://helix-toolkit.org/wpf/SharpDX"
         AllowsTransparency="True"
         Background="Transparent"
         WindowStyle="None"
@@ -47,10 +47,9 @@
 
                             <hx:Viewport3DX x:Name="PetViewDx"
                                             ShowFrameRate="False"
-                                            EnableOITRendering="True"
                                             ZoomExtentsWhenLoaded="True"
                                             Background="#00FFFFFF">
-                                 <hx:Viewport3DX.Camera>
+                                <hx:Viewport3DX.Camera>
                                     <hx:PerspectiveCamera x:Name="Camera"
                                                           Position="0,1.5,3.5"
                                                           LookDirection="0,-0.5,-3.5"
@@ -58,12 +57,10 @@
                                                           FieldOfView="45"/>
                                 </hx:Viewport3DX.Camera>
 
-                                <!-- 灯光：方向光 + 环境光 -->
                                 <hx:DirectionalLight3D Direction="-1,-1,-2" Color="White"/>
                                 <hx:AmbientLight3D Color="#666666"/>
 
-                                <!-- 3D 模型容器（代码里向这里添加 SceneNode） -->
-                                <hx:GroupModel3D x:Name="SceneRoot"/>
+                                <hx:SceneNodeGroupModel3D x:Name="SceneRoot"/>
                             </hx:Viewport3DX>
 
                         </Grid>
