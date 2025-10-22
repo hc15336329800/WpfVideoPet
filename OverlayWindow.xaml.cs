@@ -136,17 +136,29 @@ namespace WpfVideoPet
             _sceneRoot.AddChildNode(CreateAmbientLight());
             _sceneRoot.AddChildNode(CreateDirectionalLight());
 
-            _renderHost = new RenderHostDX();
+            var transparentColor = new SDX.Color4(0f, 0f, 0f, 0f); // 透明色
+
+            _renderHost = new RenderHostDX
+            {
+                ClearColor = transparentColor
+            };
             _renderHost.OnImageSourceChanged += OnRenderHostImageSourceChanged;
             _renderHost.EffectsManager = _effectsManager;
 
             _viewportCore = new ViewportCore(_renderHost)
             {
                 EffectsManager = _effectsManager,
-                CameraCore = _cameraCore
+                CameraCore = _cameraCore,
+                BackgroundColor = transparentColor,
+                ShowCoordinateSystem = false,
+                ShowFPS = false,
+                ShowRenderDetail = false,
+                ShowViewCube = false
             };
             _viewportCore.Items.AddChildNode(_sceneRoot);
             _viewportCore.Attach(_renderHost);
+
+            AppLogger.Info("已为 3D 视口应用透明背景并关闭坐标与调试标识。");
 
             try
             {
