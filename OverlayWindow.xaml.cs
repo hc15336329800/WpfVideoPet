@@ -423,7 +423,7 @@ namespace WpfVideoPet
                     Configuration =
                     {
                         ImportAnimations = true,
-                        CreateSkeletonForBoneSkinningMesh = true
+        CreateSkeletonForBoneSkinningMesh = false //  不生成骨骼可视化（否则会出现红色骨骼点/蓝色骨架线）
                     }
                 };
 
