@@ -24,11 +24,11 @@ namespace WpfVideoPet
         private readonly LibVLC _libVlc;
         private readonly LibVLCSharp.Shared.MediaPlayer _player;
         private readonly DispatcherTimer _clockTimer;
-        private readonly DispatcherTimer _petTimer;
-        private double _angle;
-        private OverlayWindow? _overlay;
-        private VideoCallWindow? _videoCallWindow;
-        private readonly DispatcherTimer _volumeRestoreTimer;
+        private readonly DispatcherTimer _petTimer; // 宠物动画计时器
+        private double _angle; // 宠物旋转角度
+        private OverlayWindow? _overlay; // 叠加层窗口实例
+        private VideoCallWindow? _videoCallWindow; // 视频通话窗口实例
+        private readonly DispatcherTimer _volumeRestoreTimer; // 音量恢复计时器
         /// <summary>
         /// 控制语音识别提示自动隐藏的计时器，避免识别文本长时间停留。
         /// </summary>
@@ -49,9 +49,9 @@ namespace WpfVideoPet
         private readonly HttpClient _httpClient = new();
         private readonly string _mediaCacheDirectory;
         private readonly ConcurrentDictionary<string, Task<string?>> _mediaDownloadTasks = new(StringComparer.OrdinalIgnoreCase);
-        private readonly object _playbackStateLock = new();
-        private string? _currentLocalMediaPath;
-        private string? _currentRemoteMediaUrl;
+        private readonly object _playbackStateLock = new(); // 播放状态锁
+        private string? _currentLocalMediaPath; // 当前本地媒体路径
+        private string? _currentRemoteMediaUrl; // 当前远程媒体地址
         private readonly AikitWakeService _wakeService;
         /// <summary>
         /// 语音播报服务实例，用于进行实时转写。
@@ -70,6 +70,13 @@ namespace WpfVideoPet
         private CancellationTokenSource? _aiAnswerCts; // 当前豆包回答任务取消源
         private AiChatPopupWindow? _aiChatWindow; // AI 问答弹窗引用
         private bool _expectAiAnswer; // 标记是否需要触发豆包回答
+        private readonly DispatcherTimer _aiChatInactivityTimer; // AI 弹窗无语音关闭计时器
+        private static readonly TimeSpan AiChatInactivityTimeout = TimeSpan.FromSeconds(5); // AI 弹窗监听超时
+        private readonly object _audioDuckingLock = new(); // 音量压制状态锁
+        private readonly HashSet<string> _activeAudioDuckingReasons = new(); // 当前音量压制原因
+        private const string DuckingReasonAiChat = "AI_CHAT_WINDOW"; // AI 弹窗压制标识
+        private const string DuckingReasonTts = "AI_CHAT_TTS"; // TTS 播报压制标识
+        private const string DuckingReasonVideoCall = "VIDEO_CALL_WINDOW"; // 视频通话压制标识
 
         // 构造函数
         public MainWindow()
@@ -164,6 +171,12 @@ namespace WpfVideoPet
                 Interval = TranscriptionAutoHideDelay
             };
             _transcriptionResetTimer.Tick += (_, __) => ResetTranscriptionDisplay();
+
+            _aiChatInactivityTimer = new DispatcherTimer
+            {
+                Interval = AiChatInactivityTimeout
+            };
+            _aiChatInactivityTimer.Tick += OnAiChatInactivityTimeout;
 
             AppLogger.Info("已移除 System.Speech 蓝猫一号的 唤醒逻辑，避免与讯飞唤醒功能冲突。");
             InitializeMqttService();
@@ -362,8 +375,12 @@ namespace WpfVideoPet
             _player?.Dispose();
             _libVlc?.Dispose();
 
+            EndAudioDucking(DuckingReasonAiChat);
+            EndAudioDucking(DuckingReasonTts);
+            EndAudioDucking(DuckingReasonVideoCall);
             _volumeRestoreTimer.Stop();
             _transcriptionResetTimer.Stop();
+            _aiChatInactivityTimer.Stop();
         }
 
         // 说明：此方法在你的构造函数事件绑定中被频繁调用，确保存在
@@ -397,31 +414,6 @@ namespace WpfVideoPet
         //}
 
 
-        private void ScheduleVolumeRestore()
-        {
-            if (!_audioDuckingConfig.Enabled)
-            {
-                return;
-            }
-
-            if (!_isDuckingAudio)
-            {
-                return;
-            }
-
-            _volumeRestoreTimer.Stop();
-
-            if (_audioDuckingConfig.RestoreDelaySeconds <= 0)
-            {
-                RestorePlayerVolume();
-                return;
-            }
-
-            _volumeRestoreTimer.Interval = _audioDuckingConfig.RestoreDelay;
-            _volumeRestoreTimer.Start();
-        }
-
-
         private void RestorePlayerVolume()
         {
             _volumeRestoreTimer.Stop();
@@ -434,7 +426,6 @@ namespace WpfVideoPet
             _isDuckingAudio = false;
             SetPlayerVolume(_userPreferredVolume);
         }
-
         private void SetPlayerVolume(int volume, bool updateSlider = true, bool updateUserPreferred = true)
         {
             volume = Math.Clamp(volume, 0, 100);
@@ -457,6 +448,129 @@ namespace WpfVideoPet
             }
         }
 
+        /// <summary>
+        /// 启动音量压制逻辑，根据原因标记确保背景音乐被压低。
+        /// </summary>
+        /// <param name="reason">触发压制的原因标识。</param>
+        private void BeginAudioDucking(string reason)
+        {
+            if (!_audioDuckingConfig.Enabled)
+            {
+                AppLogger.Info($"音量压制已禁用，忽略原因: {reason}");
+                return;
+            }
+
+            lock (_audioDuckingLock)
+            {
+                if (_activeAudioDuckingReasons.Add(reason))
+                {
+                    AppLogger.Info($"添加音量压制原因: {reason}。");
+                }
+                else
+                {
+                    AppLogger.Info($"音量压制原因已存在: {reason}，保持当前状态。");
+                }
+
+                ApplyAudioDuckingStateLocked();
+            }
+        }
+
+        /// <summary>
+        /// 取消指定的音量压制原因，必要时恢复原始音量。
+        /// </summary>
+        /// <param name="reason">需要移除的压制原因。</param>
+        private void EndAudioDucking(string reason)
+        {
+            lock (_audioDuckingLock)
+            {
+                if (_activeAudioDuckingReasons.Remove(reason))
+                {
+                    AppLogger.Info($"移除音量压制原因: {reason}。");
+                }
+                else
+                {
+                    AppLogger.Info($"尝试移除不存在的音量压制原因: {reason}。");
+                }
+
+                ApplyAudioDuckingStateLocked();
+            }
+        }
+
+        /// <summary>
+        /// 根据当前压制原因数量切换音量压制状态，内部需在锁内调用。
+        /// </summary>
+        private void ApplyAudioDuckingStateLocked()
+        {
+            var shouldDuck = _activeAudioDuckingReasons.Count > 0;
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                _volumeRestoreTimer.Stop();
+
+                if (shouldDuck)
+                {
+                    if (!_isDuckingAudio)
+                    {
+                        _isDuckingAudio = true;
+                        var duckedVolume = Math.Max(5, (int)Math.Round(_userPreferredVolume * 0.3));
+                        AppLogger.Info($"进入音量压制状态，原音量: {_userPreferredVolume}，压制后音量: {duckedVolume}。");
+                        SetPlayerVolume(duckedVolume, updateUserPreferred: false);
+                    }
+                    else
+                    {
+                        AppLogger.Info("保持音量压制状态，等待相关流程结束。");
+                    }
+                }
+                else if (_isDuckingAudio)
+                {
+                    _isDuckingAudio = false;
+                    AppLogger.Info($"音量压制原因清空，恢复用户设定音量: {_userPreferredVolume}。");
+                    SetPlayerVolume(_userPreferredVolume);
+                }
+            }));
+        }
+
+        /// <summary>
+        /// 启动 AI 问答弹窗的语音空闲计时，若超时将关闭弹窗。
+        /// </summary>
+        private void StartAiChatInactivityCountdown()
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                _aiChatInactivityTimer.Stop();
+                _aiChatInactivityTimer.Interval = AiChatInactivityTimeout;
+                _aiChatInactivityTimer.Start();
+                AppLogger.Info($"AI 问答弹窗监听阶段开始计时，{AiChatInactivityTimeout.TotalSeconds} 秒内无语音将自动关闭。");
+            }));
+        }
+
+        /// <summary>
+        /// 停止 AI 问答弹窗的语音空闲计时，防止误触自动关闭。
+        /// </summary>
+        private void StopAiChatInactivityCountdown()
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_aiChatInactivityTimer.IsEnabled)
+                {
+                    _aiChatInactivityTimer.Stop();
+                    AppLogger.Info("AI 问答弹窗监听计时器已停止。");
+                }
+            }));
+        }
+
+        /// <summary>
+        /// AI 问答弹窗在监听阶段超时未检测到语音时的回调。
+        /// </summary>
+        private void OnAiChatInactivityTimeout(object? sender, EventArgs e)
+        {
+            _aiChatInactivityTimer.Stop();
+            AppLogger.Warn("AI 问答弹窗监听阶段 5 秒内未检测到语音输入，将自动关闭。");
+            ResetAiChatExpectation();
+            EndAudioDucking(DuckingReasonAiChat);
+            EndAudioDucking(DuckingReasonTts);
+            _aiChatWindow?.Close();
+        }
 
         /// <summary>
         /// 初始化 MQTT 服务，订阅任务下发主题。
@@ -1368,6 +1482,7 @@ namespace WpfVideoPet
             }
 
             UpdateTranscriptionDisplay("语音识别中...", text);
+            StopAiChatInactivityCountdown();
 
             if (_expectAiAnswer)
             {
@@ -1390,6 +1505,7 @@ namespace WpfVideoPet
             {
                 AppLogger.Info("语音识别完成但未返回有效文本，保持默认提示。");
                 UpdateTranscriptionDisplay("识别结束", "未识别到有效语音内容。");
+                StopAiChatInactivityCountdown();
 
                 if (_expectAiAnswer)
                 {
@@ -1405,10 +1521,10 @@ namespace WpfVideoPet
             else
             {
                 AppLogger.Info($"语音识别完成，最终文本: {finalText}");
+                StopAiChatInactivityCountdown();
                 DisplayFinalTranscriptAndMaybeStartAi(finalText!);
             }
         }
-
         /// <summary>
         /// 在语音识别完成后同步展示最终文本，并在需要时立即启动豆包 AI 的流式回答。
         /// </summary>
@@ -1437,6 +1553,7 @@ namespace WpfVideoPet
             AppLogger.Warn($"语音识别回调失败，返回消息: {message}");
             var content = string.IsNullOrWhiteSpace(message) ? "语音识别失败，请稍后重试。" : message;
             UpdateTranscriptionDisplay("识别失败", content);
+            StopAiChatInactivityCountdown();
 
             if (_expectAiAnswer)
             {
@@ -1448,7 +1565,6 @@ namespace WpfVideoPet
                 }));
             }
         }
-
         /// <summary>
         /// 为语音识别阶段准备 AI 问答弹窗，提示用户可以提问。
         /// </summary>
@@ -1460,9 +1576,10 @@ namespace WpfVideoPet
                 _aiChatWindow?.ClearAnswer();
                 _aiChatWindow?.SetQuestion("蓝猫正在倾听,可以咨询法律法规相关问题 ~ ");  //初始标题
                 _aiChatWindow?.ActivateWindow();
+                BeginAudioDucking(DuckingReasonAiChat);
+                StartAiChatInactivityCountdown();
             }));
         }
-
         /// <summary>
         /// 创建或重新绑定 AI 问答弹窗实例，确保其生命周期受主窗口托管。
         /// </summary>
@@ -1470,6 +1587,7 @@ namespace WpfVideoPet
         {
             if (_aiChatWindow != null)
             {
+                BeginAudioDucking(DuckingReasonAiChat);
                 return;
             }
 
@@ -1479,15 +1597,21 @@ namespace WpfVideoPet
                 WindowStartupLocation = WindowStartupLocation.CenterOwner
             };
 
+            _aiChatWindow.TtsPlaybackStarted += OnAiChatWindowTtsPlaybackStarted;
+            _aiChatWindow.TtsPlaybackCompleted += OnAiChatWindowTtsPlaybackCompleted;
+
             _aiChatWindow.Closed += (_, _) =>
             {
                 AppLogger.Info("AI 问答弹窗已关闭并释放引用。");
+                StopAiChatInactivityCountdown();
+                EndAudioDucking(DuckingReasonAiChat);
+                EndAudioDucking(DuckingReasonTts);
                 _aiChatWindow = null;
             };
 
+            BeginAudioDucking(DuckingReasonAiChat);
             AppLogger.Info("AI 问答弹窗实例已创建并与主窗口绑定。");
         }
-
         /// <summary>
         /// 调用豆包知识库服务处理指定问题，并在弹窗中实时展示回答内容。
         /// </summary>
@@ -1617,6 +1741,23 @@ namespace WpfVideoPet
         }
 
         /// <summary>
+        /// AI 问答弹窗通知 TTS 播报开始时的回调，压低背景音乐。
+        /// </summary>
+        private void OnAiChatWindowTtsPlaybackStarted(object? sender, EventArgs e)
+        {
+            AppLogger.Info("AI 问答弹窗开始进行 TTS 播报，准备压低背景音乐。");
+            BeginAudioDucking(DuckingReasonTts);
+        }
+
+        /// <summary>
+        /// AI 问答弹窗通知 TTS 播报结束时的回调，恢复音量。
+        /// </summary>
+        private void OnAiChatWindowTtsPlaybackCompleted(object? sender, EventArgs e)
+        {
+            AppLogger.Info("AI 问答弹窗完成 TTS 播报，尝试恢复背景音乐音量。");
+            EndAudioDucking(DuckingReasonTts);
+        }
+        /// <summary>
         /// 将语音识别文案同步到界面层，自动切换到 UI 线程。
         /// </summary>
         /// <param name="title">标题文本。</param>
@@ -1671,7 +1812,13 @@ namespace WpfVideoPet
             {
                 Owner = this
             };
-            _videoCallWindow.Closed += (_, _) => _videoCallWindow = null;
+            _videoCallWindow.Closed += (_, _) =>
+            {
+                AppLogger.Info("视频通话窗口已关闭，准备恢复背景音乐音量。");
+                _videoCallWindow = null;
+                EndAudioDucking(DuckingReasonVideoCall);
+            };
+            BeginAudioDucking(DuckingReasonVideoCall);
             _videoCallWindow.Show();
         }
 

@@ -20,6 +20,16 @@ namespace WpfVideoPet.doubao
         private readonly string _ttsOutputPath; // TTS音频路径
 
         /// <summary>
+        /// 在 TTS 播放开始时触发，便于外部执行音量压制。
+        /// </summary>
+        public event EventHandler? TtsPlaybackStarted;
+
+        /// <summary>
+        /// 在 TTS 播放结束时触发，便于外部恢复音量。
+        /// </summary>
+        public event EventHandler? TtsPlaybackCompleted;
+
+        /// <summary>
         /// 初始化弹窗并配置自动关闭计时器。
         /// </summary>
         public AiChatPopupWindow()
@@ -225,6 +235,7 @@ namespace WpfVideoPet.doubao
             }
 
             var tcs = new TaskCompletionSource<bool>();
+            var playbackNotified = false; // 播放状态通知标记
 
             void CleanupHandlers()
             {
@@ -253,6 +264,8 @@ namespace WpfVideoPet.doubao
             {
                 _ttsPlayer.Open(new Uri(_ttsOutputPath));
                 _ttsPlayer.Play();
+                TtsPlaybackStarted?.Invoke(this, EventArgs.Empty);
+                playbackNotified = true;
                 AppLogger.Info($"开始播放讯飞TTS音频: {_ttsOutputPath}");
                 await tcs.Task;
                 AppLogger.Info("讯飞TTS音频播放完成。");
@@ -260,6 +273,11 @@ namespace WpfVideoPet.doubao
             finally
             {
                 CleanupHandlers();
+                if (playbackNotified)
+                {
+                    TtsPlaybackCompleted?.Invoke(this, EventArgs.Empty);
+                    AppLogger.Info("已广播TTS播放完成事件，通知外部恢复音量。");
+                }
             }
         }
     }
