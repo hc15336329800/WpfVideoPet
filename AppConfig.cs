@@ -160,6 +160,10 @@ namespace WpfVideoPet
                             {
                                 ducking.RestoreDelaySeconds = Math.Max(0, restoreDelaySeconds);
                             }
+                            if (duckingElement.TryGetProperty("targetVolumePercentage", out var targetVolumeElement) && targetVolumeElement.TryGetInt32(out var targetVolume))
+                            {
+                                ducking.TargetVolumePercentage = Math.Clamp(targetVolume, 0, 100);
+                            }
                         }
                     }
 
@@ -424,6 +428,11 @@ public sealed class AudioDuckingConfig
     /// 在恢复正常音量前的等待秒数，允许 0 表示立即恢复。
     /// </summary>
     public int RestoreDelaySeconds { get; set; } = 3;
+
+    /// <summary>
+    /// 压制阶段的目标音量百分比，0 表示静音，100 表示保持原音量。
+    /// </summary>
+    public int TargetVolumePercentage { get; set; } = 10;
 
     public TimeSpan RestoreDelay => TimeSpan.FromSeconds(Math.Max(0, RestoreDelaySeconds));
 }

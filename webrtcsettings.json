@@ -50,8 +50,9 @@
   "audio": {
     "_comment": "语音识别时的音量压低设置。",
     "ducking": {
-      "enabled": false,
-      "restoreDelaySeconds": 5
+      "enabled": true,
+      "restoreDelaySeconds": 5,
+      "targetVolumePercentage": 0
     }
   }
 }

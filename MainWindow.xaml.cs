@@ -414,6 +414,9 @@ namespace WpfVideoPet
         //}
 
 
+        /// <summary>
+        /// 恢复播放器音量到用户设定值并记录恢复动作，防止压制状态残留。
+        /// </summary>
         private void RestorePlayerVolume()
         {
             _volumeRestoreTimer.Stop();
@@ -426,12 +429,19 @@ namespace WpfVideoPet
             _isDuckingAudio = false;
             SetPlayerVolume(_userPreferredVolume);
         }
+        /// <summary>
+        /// 调整播放器音量，支持同时刷新滑块与用户偏好值，确保界面状态同步。
+        /// </summary>
+        /// <param name="volume">目标音量（0-100）。</param>
+        /// <param name="updateSlider">指示是否同步更新 UI 滑块。</param>
+        /// <param name="updateUserPreferred">指示是否重写用户偏好音量。</param>
         private void SetPlayerVolume(int volume, bool updateSlider = true, bool updateUserPreferred = true)
         {
             volume = Math.Clamp(volume, 0, 100);
 
             if (_player.Volume != volume)
             {
+                AppLogger.Info($"准备调整播放器音量，当前值: {_player.Volume}，目标值: {volume}。");
                 _player.Volume = volume;
             }
 
@@ -447,7 +457,6 @@ namespace WpfVideoPet
                 _userPreferredVolume = volume;
             }
         }
-
         /// <summary>
         /// 启动音量压制逻辑，根据原因标记确保背景音乐被压低。
         /// </summary>
@@ -512,8 +521,9 @@ namespace WpfVideoPet
                     if (!_isDuckingAudio)
                     {
                         _isDuckingAudio = true;
-                        var duckedVolume = Math.Max(5, (int)Math.Round(_userPreferredVolume * 0.3));
-                        AppLogger.Info($"进入音量压制状态，原音量: {_userPreferredVolume}，压制后音量: {duckedVolume}。");
+                        var targetPercentage = Math.Clamp(_audioDuckingConfig.TargetVolumePercentage, 0, 100);
+                        var duckedVolume = CalculateDuckedVolume(targetPercentage);
+                        AppLogger.Info($"进入音量压制状态，原音量: {_userPreferredVolume}，目标百分比: {targetPercentage}%，压制后音量: {duckedVolume}。");
                         SetPlayerVolume(duckedVolume, updateUserPreferred: false);
                     }
                     else
@@ -528,6 +538,25 @@ namespace WpfVideoPet
                     SetPlayerVolume(_userPreferredVolume);
                 }
             }));
+        }
+
+        /// <summary>
+        /// 根据配置的百分比计算压制后的音量，避免结果高于当前用户音量。
+        /// </summary>
+        /// <param name="targetPercentage">配置的音量百分比。</param>
+        /// <returns>压制后的音量值。</returns>
+        private int CalculateDuckedVolume(int targetPercentage)
+        {
+            if (_userPreferredVolume <= 0 || targetPercentage <= 0)
+            {
+                AppLogger.Info("压制百分比为 0 或用户音量为 0，直接静音处理。");
+                return 0;
+            }
+
+            var scaledVolume = (int)Math.Round(_userPreferredVolume * targetPercentage / 100.0);
+            scaledVolume = Math.Clamp(scaledVolume, 0, _userPreferredVolume);
+            AppLogger.Info($"根据压制百分比计算音量，百分比: {targetPercentage}%，结果: {scaledVolume}。");
+            return scaledVolume;
         }
 
         /// <summary>
