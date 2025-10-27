@@ -7,13 +7,13 @@
   "room": "lanmao001",
   "_comment_room": "房间号：访客与坐席需填写相同的房间名才能互通。",
 
-  "signalServer": "wss://192.168.1.8:8443", //信令服务器IP  重要
+  "signalServer": "wss://60.208.82.254:8443", //信令服务器IP  重要
   "_comment_signalServer": "信令服务器 WebSocket 地址，例如 wss://example.com/ws。",
 
   "operatorToken": "",
   "_comment_operatorToken": "坐席端鉴权 Token（如需要），访客端可留空。",
 
-  "pageUrl": "https://192.168.1.8/", //信令服务器IP  重要
+  "pageUrl": "https://60.208.82.254/", //信令服务器IP  重要
   "_comment_pageUrl": "承载 WebRTC 前端页面的地址，将在 WebView2 中加载。",
 
   "mqtt": {
