@@ -125,7 +125,21 @@ namespace WpfVideoPet
             {
                 _sceneRoot.AddChildNode(_loadedScene.Root);
                 AppLogger.Info($"模型加载成功：{modelPath}");
+
                 InitializeAnimationPlayer();
+                _loadedScene?.Root?.UpdateAllTransformMatrix(); //  确保 BoundsWithTransform 是最新的
+
+                //  根据场景包围盒自动对齐相机的垂直中心，避免“看不到头”
+                if (_cameraCore != null && TryGetSceneBounds(_loadedScene.Root, out var bb))
+                {
+                    var centerY = (bb.Minimum.Y + bb.Maximum.Y) * 0.5f;
+                    var pos = _cameraCore.Position;
+                    var look = _cameraCore.LookDirection;
+                    var target = pos + look;
+                    var deltaY = centerY - target.Y;
+                    _cameraCore.LookDirection = new SDX.Vector3(look.X, look.Y + deltaY, look.Z); // 仅抬/降目标点
+                    AppLogger.Info($"Camera vertical aligned to centerY={centerY:F3} (ΔY={deltaY:F3}).");
+                }
             }
             else
             {
@@ -554,5 +568,36 @@ namespace WpfVideoPet
         {
             AppLogger.Info("收到语音识别隐藏请求，但气泡区域已移除，无需额外处理。");
         }
+
+        // 【新增】递归计算场景包围盒（含变换），用于相机自动居中
+        private static bool TryGetSceneBounds(SceneNode node, out SDX.BoundingBox bounds)
+        {
+            bounds = new SDX.BoundingBox(
+                new SDX.Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity),
+                new SDX.Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity)
+            );
+            var found = false;
+
+            // HelixToolkit 的 SceneNode 通常都提供 BoundsWithTransform
+            var b = node.BoundsWithTransform;
+            if (b.Minimum != b.Maximum) 
+            {
+                bounds.Minimum = SDX.Vector3.Min(bounds.Minimum, b.Minimum);
+                bounds.Maximum = SDX.Vector3.Max(bounds.Maximum, b.Maximum);
+                found = true;
+            }
+
+            foreach (var child in node.Items)
+            {
+                if (TryGetSceneBounds(child, out var cb))
+                {
+                    bounds.Minimum = SDX.Vector3.Min(bounds.Minimum, cb.Minimum);
+                    bounds.Maximum = SDX.Vector3.Max(bounds.Maximum, cb.Maximum);
+                    found = true;
+                }
+            }
+            return found;
+        }
+
     }
 }
