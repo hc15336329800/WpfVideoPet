@@ -17,6 +17,10 @@ namespace WpfVideoPet
         public MqttConfig Mqtt { get; } = new();
         public AudioDuckingConfig AudioDucking { get; } = new();
         public WakeConfig Wake { get; } = new();
+        /// <summary>
+        /// 西门子 PLC 配置段。
+        /// </summary>
+        public PlcConfig Plc { get; } = new();
 
         public bool IsOperator => string.Equals(Role, "operator", StringComparison.OrdinalIgnoreCase);
 
@@ -142,6 +146,76 @@ namespace WpfVideoPet
                         if (mqttElement.TryGetProperty("connectionTimeout", out var connectionTimeoutElement) && connectionTimeoutElement.TryGetInt32(out var timeoutValue))
                         {
                             mqtt.ConnectionTimeout = Math.Max(0, timeoutValue);
+                        }
+                        if (root.TryGetProperty("plc", out var plcElement) && plcElement.ValueKind == JsonValueKind.Object)
+                        {
+                            var plc = config.Plc;
+
+                            if (plcElement.TryGetProperty("enabled", out var plcEnabledElement) && plcEnabledElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                            {
+                                plc.Enabled = plcEnabledElement.GetBoolean();
+                            }
+
+                            if (plcElement.TryGetProperty("cpuType", out var cpuTypeElement))
+                            {
+                                var value = cpuTypeElement.GetString();
+                                if (!string.IsNullOrWhiteSpace(value))
+                                {
+                                    plc.CpuType = value.Trim();
+                                }
+                            }
+
+                            if (plcElement.TryGetProperty("ipAddress", out var ipElement))
+                            {
+                                var value = ipElement.GetString();
+                                if (!string.IsNullOrWhiteSpace(value))
+                                {
+                                    plc.IpAddress = value.Trim();
+                                }
+                            }
+
+                            if (plcElement.TryGetProperty("rack", out var rackElement) && rackElement.TryGetInt32(out var rackValue))
+                            {
+                                plc.Rack = Math.Max(0, rackValue);
+                            }
+
+                            if (plcElement.TryGetProperty("slot", out var slotElement) && slotElement.TryGetInt32(out var slotValue))
+                            {
+                                plc.Slot = Math.Max(0, slotValue);
+                            }
+
+                            if (plcElement.TryGetProperty("pollingIntervalMilliseconds", out var intervalElement) && intervalElement.TryGetInt32(out var intervalValue))
+                            {
+                                plc.PollingIntervalMilliseconds = Math.Max(100, intervalValue);
+                            }
+
+                            if (plcElement.TryGetProperty("statusPublishTopic", out var statusTopicElement))
+                            {
+                                var value = statusTopicElement.GetString();
+                                if (!string.IsNullOrWhiteSpace(value))
+                                {
+                                    plc.StatusPublishTopic = value.Trim();
+                                }
+                            }
+
+                            if (plcElement.TryGetProperty("controlSubscribeTopic", out var controlTopicElement))
+                            {
+                                var value = controlTopicElement.GetString();
+                                if (!string.IsNullOrWhiteSpace(value))
+                                {
+                                    plc.ControlSubscribeTopic = value.Trim();
+                                }
+                            }
+
+                            if (plcElement.TryGetProperty("statusArea", out var statusAreaElement) && statusAreaElement.ValueKind == JsonValueKind.Object)
+                            {
+                                ApplyAreaConfig(statusAreaElement, plc.StatusArea);
+                            }
+
+                            if (plcElement.TryGetProperty("controlArea", out var controlAreaElement) && controlAreaElement.ValueKind == JsonValueKind.Object)
+                            {
+                                ApplyAreaConfig(controlAreaElement, plc.ControlArea);
+                            }
                         }
                     }
 
@@ -322,6 +396,29 @@ namespace WpfVideoPet
 
             return builder.ToString();
         }
+        /// <summary>
+        /// 从 JSON 片段中提取 DB 区域配置并写入目标对象。
+        /// </summary>
+        /// <param name="element">包含 dbNumber、startByte、byteLength 字段的 JSON 元素。</param>
+        /// <param name="target">待更新的区域配置实例。</param>
+        private static void ApplyAreaConfig(JsonElement element, PlcAreaConfig target)
+        {
+            if (element.TryGetProperty("dbNumber", out var dbElement) && dbElement.TryGetInt32(out var dbValue))
+            {
+                target.DbNumber = Math.Max(1, dbValue);
+            }
+
+            if (element.TryGetProperty("startByte", out var startElement) && startElement.TryGetInt32(out var startValue))
+            {
+                target.StartByte = Math.Max(0, startValue);
+            }
+
+            if (element.TryGetProperty("byteLength", out var lengthElement) && lengthElement.TryGetInt32(out var lengthValue))
+            {
+                target.ByteLength = Math.Max(1, lengthValue);
+            }
+        }
+
 
         private static bool IsEscaped(string text, int index)
         {
@@ -415,6 +512,85 @@ public sealed class MqttConfig
         }
     }
 }
+
+
+/// <summary>
+/// 描述西门子 PLC 的基础配置，包含连接参数、主题与数据区信息。
+/// </summary>
+public sealed class PlcConfig
+{
+    /// <summary>
+    /// 是否启用 PLC 相关逻辑。
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// 目标 PLC 的 CPU 类型字符串，例如 S71200。
+    /// </summary>
+    public string CpuType { get; set; } = "S71200";
+
+    /// <summary>
+    /// PLC 的 IP 地址。
+    /// </summary>
+    public string IpAddress { get; set; } = "192.168.0.1";
+
+    /// <summary>
+    /// PLC 机架号。
+    /// </summary>
+    public int Rack { get; set; } = 0;
+
+    /// <summary>
+    /// PLC 槽位号。
+    /// </summary>
+    public int Slot { get; set; } = 1;
+
+    /// <summary>
+    /// 轮询周期（毫秒）。
+    /// </summary>
+    public int PollingIntervalMilliseconds { get; set; } = 3000;
+
+    /// <summary>
+    /// PLC 轮询结果发布的 MQTT 主题。
+    /// </summary>
+    public string StatusPublishTopic { get; set; } = "plc/status/777";
+
+    /// <summary>
+    /// PLC 控制指令订阅的 MQTT 主题。
+    /// </summary>
+    public string ControlSubscribeTopic { get; set; } = "plc/control/888";
+
+    /// <summary>
+    /// 轮询读取的 DB 区域信息。
+    /// </summary>
+    public PlcAreaConfig StatusArea { get; } = new();
+
+    /// <summary>
+    /// 可写入的 DB 区域信息。
+    /// </summary>
+    public PlcAreaConfig ControlArea { get; } = new();
+}
+
+/// <summary>
+/// 代表 PLC 数据块中的一个区域配置。
+/// </summary>
+public sealed class PlcAreaConfig
+{
+    /// <summary>
+    /// 数据块编号。
+    /// </summary>
+    public int DbNumber { get; set; } = 100;
+
+    /// <summary>
+    /// 起始字节偏移。
+    /// </summary>
+    public int StartByte { get; set; } = 0;
+
+    /// <summary>
+    /// 读取或写入的字节长度。
+    /// </summary>
+    public int ByteLength { get; set; } = 3;
+}
+
 
 
 public sealed class AudioDuckingConfig

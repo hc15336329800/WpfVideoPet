@@ -17,13 +17,9 @@
   "_comment_pageUrl": "承载 WebRTC 前端页面的地址，将在 WebView2 中加载。",
 
   "mqtt": {
-    "␊": null,
     "_comment": "MQTT 对接配置，可根据后端平台的实际分配进行调整。",
-    "␊": null,
     "enabled": true,
-    "␊": null,
     "serverUri": "tcp://106.52.194.56:1883",
-    "␊": null,
     "clientId": "lanmao001", // 上位机唯一标识␊
     "topic": "ts_lanmao001", //默认主题␊
     "username": "admin",
@@ -32,6 +28,30 @@
     "cleanSession": false,
     "keepAliveInterval": 60,
     "connectionTimeout": 10
+  },
+
+  "plc": {
+    "_comment": "西门子 S7 PLC 参数，包含轮询与控制区配置。",
+    "enabled": true,
+    "cpuType": "S71200",
+    "ipAddress": "192.168.0.1",
+    "rack": 0,
+    "slot": 1,
+    "pollingIntervalMilliseconds": 3000,
+    "statusPublishTopic": "plc/status/777",
+    "controlSubscribeTopic": "plc/control/888",
+    "statusArea": {
+      "_comment": "轮询读取的 DB 区域。",
+      "dbNumber": 100,
+      "startByte": 0,
+      "byteLength": 3
+    },
+    "controlArea": {
+      "_comment": "允许写入的 DB 区域。",
+      "dbNumber": 200,
+      "startByte": 0,
+      "byteLength": 3
+    }
   },
 
   "modbus": {

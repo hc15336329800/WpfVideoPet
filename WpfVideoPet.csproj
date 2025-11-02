@@ -40,6 +40,7 @@
 		<PackageReference Include="HelixToolkit.SharpDX.Core" Version="2.27.3" />
 		<PackageReference Include="HelixToolkit.SharpDX.Core.Wpf" Version="2.27.3" />
 		<PackageReference Include="MQTTnet" Version="4.3.2" />
+		<PackageReference Include="S7.NetPlus" Version="0.17.1" />
                 <PackageReference Include="LibVLCSharp.WPF" Version="3.9.4" />
                 <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2592.51" />
                 <PackageReference Include="NAudio" Version="2.2.1" />
