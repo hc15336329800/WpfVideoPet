@@ -1358,14 +1358,14 @@ namespace WpfVideoPet
 
         private void OnWakeKeywordRecognized(object? sender, WakeKeywordEventArgs e)
         {
-            var isAiKeyword = string.Equals(e.Keyword, "蓝猫蓝猫", StringComparison.Ordinal);
+            var isAiKeyword = string.Equals(e.Keyword, "蓝猫一号", StringComparison.Ordinal);
             if (isAiKeyword)
             {
-                AppLogger.Info("识别到“蓝猫蓝猫”唤醒词，准备调度 AI 问答流程。");
+                AppLogger.Info("识别到“蓝猫一号”唤醒词，准备调度 AI 问答流程。");
             }
             else if (_expectAiAnswer)
             {
-                AppLogger.Info("收到非“蓝猫蓝猫”唤醒词，重置 AI 问答等待状态。");
+                AppLogger.Info("收到非“蓝猫一号”唤醒词，重置 AI 问答等待状态。");
             }
 
             _expectAiAnswer = isAiKeyword;

@@ -352,9 +352,9 @@ namespace WpfVideoPet.xunfei
                             AppLogger.Info("触发“小白小白”业务逻辑：例如启动语音助手或开启常用功能。");
                             notificationMessage = "已唤醒“小白小白”，正在为您准备常用功能。";
                             break;
-                        case "蓝猫蓝猫":
-                            AppLogger.Info("触发“蓝猫蓝猫”业务逻辑：例如播报天气或执行定制命令。");
-                            notificationMessage = "已唤醒“蓝猫蓝猫”，即将为您播报定制内容。";
+                        case "蓝猫一号":
+                            AppLogger.Info("触发“蓝猫一号”业务逻辑：例如播报天气或执行定制命令。");
+                            notificationMessage = "已唤醒“蓝猫一号”，即将为您播报定制内容。";
 
                             // 播放默认提示音反馈用户操作，再延迟0.5秒启动语音转写。
                             AppLogger.Info("播放默认唤醒提示音，告知用户已成功唤醒。");
@@ -376,9 +376,9 @@ namespace WpfVideoPet.xunfei
                                 }
                             });
 
-                            AppLogger.Info("“蓝猫蓝猫”指令仅执行语音识别流程，将显式阻断视频通话逻辑。");
+                            AppLogger.Info("“蓝猫一号”指令仅执行语音识别流程，将显式阻断视频通话逻辑。");
                             WakeKeywordRecognized?.Invoke(this, new WakeKeywordEventArgs(recognizedKeyword, notificationMessage));
-                            AppLogger.Info("“蓝猫蓝猫”业务处理完毕，本次唤醒流程结束。");
+                            AppLogger.Info("“蓝猫一号”业务处理完毕，本次唤醒流程结束。");
                             return;
                         case "打开视频":
                             AppLogger.Info("触发“打开视频”业务逻辑：准备唤起视频通话窗口。");
