@@ -376,7 +376,8 @@ namespace WpfVideoPet.service
 
             try
             {
-                byte[] data;
+                byte[] data; // PLC 返回的原始字节
+
 
                 await _plcLock.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
@@ -393,9 +394,17 @@ namespace WpfVideoPet.service
                 {
                     _plcLock.Release();
                 }
-
-                var dataText = data.Length > 0 ? BitConverter.ToString(data) : "无数据";
-                AppLogger.Info($"Siemens S7 服务初始化验证完成，DB100[0] = {dataText}");
+                if (data.Length > 0)
+                {
+                    var dbByte = data[0]; // DB100[0] 的字节值
+                    var hexText = dbByte.ToString("X2"); // 十六进制文本
+                    var decimalValue = dbByte; // 十进制数值
+                    AppLogger.Info($"Siemens S7 服务初始化验证完成，DB100[0] = 0x{hexText} ({decimalValue})");
+                }
+                else
+                {
+                    AppLogger.Warn("Siemens S7 服务初始化验证未读取到 DB100 字节数据。");
+                }
             }
             catch (OperationCanceledException)
             {
