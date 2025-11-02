@@ -3,13 +3,14 @@ using MQTTnet.Client;
 using S7.Net;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using WpfVideoPet;
+
 
 namespace WpfVideoPet.service
 {
@@ -27,6 +28,8 @@ namespace WpfVideoPet.service
         private Task? _pollingTask; // 轮询后台任务
         private Plc? _plc; // PLC 客户端实例
         private bool _disposed; // 释放状态标记
+        private bool _initialStateLogged; // 是否已输出初始化日志
+
 
         /// <summary>
         /// 通过 AppConfig 创建 PLC 服务实例，自动复用 MQTT 单例。
@@ -48,6 +51,7 @@ namespace WpfVideoPet.service
             _config = plcConfig ?? throw new ArgumentNullException(nameof(plcConfig));
             _mqttService = mqttService ?? throw new ArgumentNullException(nameof(mqttService));
             _controlHandler = HandleControlMessageAsync;
+            AppLogger.Info($"Siemens S7 服务初始化: IP={_config.IpAddress}, Rack={_config.Rack}, Slot={_config.Slot}, CPU={_config.CpuType ?? "未指定"}");
         }
 
         /// <summary>
@@ -63,13 +67,18 @@ namespace WpfVideoPet.service
 
             if (!_config.Enabled)
             {
+                AppLogger.Info("Siemens S7 服务配置为禁用状态，跳过启动请求。");
                 return;
             }
 
             if (_pollingTask != null)
             {
+                AppLogger.Info("Siemens S7 服务检测到重复启动请求，已忽略。");
                 return;
             }
+
+            AppLogger.Info("Siemens S7 服务开始启动后台轮询任务。");
+
 
             if (!string.IsNullOrWhiteSpace(_config.ControlSubscribeTopic))
             {
@@ -78,6 +87,8 @@ namespace WpfVideoPet.service
 
             _pollingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _pollingTask = Task.Run(async () => await RunPollingLoopAsync(_pollingCts.Token).ConfigureAwait(false));
+            AppLogger.Info("Siemens S7 服务已调度后台轮询任务。");
+
         }
 
         /// <summary>
@@ -120,6 +131,8 @@ namespace WpfVideoPet.service
             }
 
             await ClosePlcAsync().ConfigureAwait(false);
+            AppLogger.Info("Siemens S7 服务已停止并关闭 PLC 连接。");
+
         }
 
         /// <summary>
@@ -282,13 +295,13 @@ namespace WpfVideoPet.service
                 _plcLock.Release();
             }
         }
-
         /// <summary>
         /// 确保 PLC 连接可用，必要时自动重连。
         /// </summary>
         /// <param name="cancellationToken">取消令牌。</param>
         private async Task EnsurePlcConnectedAsync(CancellationToken cancellationToken)
         {
+            var shouldLog = false; // 是否需要输出初始化日志
             if (_plc != null && _plc.IsConnected)
             {
                 return;
@@ -307,10 +320,20 @@ namespace WpfVideoPet.service
                 {
                     await Task.Run(() => _plc.Open(), cancellationToken).ConfigureAwait(false);
                 }
+
+                if (_plc.IsConnected && !_initialStateLogged)
+                {
+                    shouldLog = true;
+                }
             }
             finally
             {
                 _plcLock.Release();
+            }
+
+            if (shouldLog)
+            {
+                await LogInitialPlcStateAsync(cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -329,13 +352,63 @@ namespace WpfVideoPet.service
                         _plc.Close();
                     }
 
-                    _plc.Dispose();
+                    (_plc as IDisposable)?.Dispose();
                     _plc = null;
                 }
             }
             finally
             {
                 _plcLock.Release();
+            }
+        }
+        /// <summary>
+        /// 在 PLC 首次连接后记录初始化信息，并读取 DB100 的首字节作为连通性测试。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌，用于在应用停止时打断测试读取。</param>
+        private async Task LogInitialPlcStateAsync(CancellationToken cancellationToken)
+        {
+            if (_initialStateLogged)
+            {
+                return;
+            }
+
+            AppLogger.Info("Siemens S7 服务已建立连接，准备读取 DB100[0] 进行初始化验证。");
+
+            try
+            {
+                byte[] data;
+
+                await _plcLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    if (_plc == null || !_plc.IsConnected)
+                    {
+                        AppLogger.Warn("PLC 在初始化验证时未保持连接，跳过 DB100 测试读取。");
+                        return;
+                    }
+
+                    data = await Task.Run(() => _plc.ReadBytes(DataType.DataBlock, 100, 0, 1) ?? Array.Empty<byte>(), cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _plcLock.Release();
+                }
+
+                var dataText = data.Length > 0 ? BitConverter.ToString(data) : "无数据";
+                AppLogger.Info($"Siemens S7 服务初始化验证完成，DB100[0] = {dataText}");
+            }
+            catch (OperationCanceledException)
+            {
+                AppLogger.Warn("初始化阶段读取 DB100 被取消。");
+                throw;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, "初始化阶段读取 DB100 失败。");
+            }
+            finally
+            {
+                _initialStateLogged = true;
             }
         }
 

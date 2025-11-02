@@ -34,7 +34,7 @@
     "_comment": "西门子 S7 PLC 参数，包含轮询与控制区配置。",
     "enabled": true,
     "cpuType": "S71200",
-    "ipAddress": "192.168.0.1",
+    "ipAddress": "192.168.0.10",
     "rack": 0,
     "slot": 1,
     "pollingIntervalMilliseconds": 3000,

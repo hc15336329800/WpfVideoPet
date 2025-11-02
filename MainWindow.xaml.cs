@@ -77,6 +77,8 @@ namespace WpfVideoPet
         private const string DuckingReasonAiChat = "AI_CHAT_WINDOW"; // AI 弹窗压制标识
         private const string DuckingReasonTts = "AI_CHAT_TTS"; // TTS 播报压制标识
         private const string DuckingReasonVideoCall = "VIDEO_CALL_WINDOW"; // 视频通话压制标识
+        private SiemensS7Service? _plcService; // PLC 服务实例
+
 
         // 构造函数
         public MainWindow()
@@ -188,6 +190,16 @@ namespace WpfVideoPet
 
             _wakeService = new AikitWakeService(_appConfig.Wake.SdkDirectory);
             InitializeWakeService();
+
+            if (_appConfig.Plc.Enabled)
+            {
+                _plcService = new SiemensS7Service(_appConfig); // 创建 PLC 服务
+                _ = StartPlcServiceAsync();
+            }
+            else
+            {
+                AppLogger.Info("Siemens S7 服务在配置中被禁用，未启动 PLC 轮询。");
+            }
 
 
 
@@ -1280,6 +1292,19 @@ namespace WpfVideoPet
             _wakeService.SpeechRecognitionRequested -= OnSpeechRecognitionRequested;
             _wakeService.Dispose();
 
+            if (_plcService != null)
+            {
+                try
+                {
+                    await _plcService.DisposeAsync().ConfigureAwait(false);
+                    AppLogger.Info("Siemens S7 服务已正常释放。");
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, "释放 Siemens S7 服务时发生异常。");
+                }
+            }
+
             if (_bobaoService != null)
             {
                 _bobaoService.InterimResultReceived -= OnBobaoInterimResult;
@@ -1315,6 +1340,27 @@ namespace WpfVideoPet
                 _httpClient.Dispose();
                 AppLogger.Info("主窗口关闭，HTTP 客户端资源已释放。");
 
+            }
+        }
+        /// <summary>
+        /// 异步启动 PLC 服务，确保初始化日志及时写入并在发生异常时记录错误详情。
+        /// 该方法在主窗口构造完成后触发，不会阻塞 UI 线程。
+        /// </summary>
+        private async Task StartPlcServiceAsync()
+        {
+            if (_plcService == null)
+            {
+                return;
+            }
+
+            try
+            {
+                await _plcService.StartAsync().ConfigureAwait(false);
+                AppLogger.Info("Siemens S7 服务启动流程已完成调度。");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, "Siemens S7 服务启动失败。");
             }
         }
 
