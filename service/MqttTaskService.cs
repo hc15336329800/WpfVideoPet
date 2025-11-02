@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using System.Text;
 using System.Windows;
 
-namespace WpfVideoPet.mqtt
+namespace WpfVideoPet.service
 {
     /// <summary>
     /// 负责与后端 BladeX 系统进行 MQTT 通讯的服务，订阅任务 Topic 并将媒体任务向上抛出。

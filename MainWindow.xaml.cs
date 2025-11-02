@@ -14,7 +14,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
 using WpfVideoPet.doubao;
-using WpfVideoPet.mqtt;
+using WpfVideoPet.service;
 using WpfVideoPet.xunfei;
 
 namespace WpfVideoPet

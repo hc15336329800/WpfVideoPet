@@ -66,6 +66,10 @@
                 </None>
         </ItemGroup>
 
+        <ItemGroup>
+          <Folder Include="mqtt\" />
+        </ItemGroup>
+
 
 	<Target Name="EnsureWpfVideoPetNotRunning" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
 		<Exec Command="taskkill /F /IM WpfVideoPet.exe" ContinueOnError="true" />
