@@ -13,6 +13,7 @@ namespace WpfVideoPet.mqtt
 {
     /// <summary>
     /// 提供最精简的 16 字节 MQTT 通信框架，负责连接、收发与日志记录。
+    /// 处理：连接、订阅、重连这些底层细节
     /// </summary>
     public sealed class FixedLengthMqttBridge : IAsyncDisposable
     {
