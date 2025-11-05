@@ -14,6 +14,8 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
 using WpfVideoPet.doubao;
+using WpfVideoPet.model;
+using WpfVideoPet.mqtt;
 using WpfVideoPet.service;
 using WpfVideoPet.xunfei;
 
@@ -45,7 +47,8 @@ namespace WpfVideoPet
         private int _userPreferredVolume;
         private readonly AppConfig _appConfig;
         private readonly AudioDuckingConfig _audioDuckingConfig;
-        private MqttTaskService? _mqttService;
+        private FixedLengthMqttBridge? _mqttBridge; // 16 字节 MQTT 桥
+        private RemoteMediaService? _mqttService; // 16 字节 MQTT 任务服务
         private readonly HttpClient _httpClient = new();
         private readonly string _mediaCacheDirectory;
         private readonly ConcurrentDictionary<string, Task<string?>> _mediaDownloadTasks = new(StringComparer.OrdinalIgnoreCase);
@@ -193,8 +196,15 @@ namespace WpfVideoPet
 
             if (_appConfig.Plc.Enabled)
             {
-                _plcService = new SiemensS7Service(_appConfig); // 创建 PLC 服务
-                _ = StartPlcServiceAsync();
+                if (_mqttBridge == null)
+                {
+                    AppLogger.Warn("MQTT 桥接尚未初始化，PLC 服务无法启动。");
+                }
+                else
+                {
+                    _plcService = new SiemensS7Service(_appConfig, _mqttBridge); // 创建 PLC 服务
+                    _ = StartPlcServiceAsync();
+                }
             }
             else
             {
@@ -630,8 +640,9 @@ namespace WpfVideoPet
                 return;
             }
 
-            _mqttService = new MqttTaskService(_appConfig.Mqtt);
-            _mqttService.RemoteMediaTaskReceived += OnRemoteMediaTaskReceived;
+            _mqttBridge ??= new FixedLengthMqttBridge(_appConfig.Mqtt);
+            _mqttService = new RemoteMediaService(_mqttBridge);
+            _mqttService.PayloadReceived += OnMqttPayloadReceived;
 
             _ = _mqttService.StartAsync().ContinueWith(task =>
             {
@@ -642,86 +653,22 @@ namespace WpfVideoPet
                 }
                 else
                 {
-                    AppLogger.Info("MQTT 服务启动完成，等待远程媒体任务。");
+                    AppLogger.Info("MQTT 服务启动完成，等待 16 字节定长消息。");
                 }
             }, TaskScheduler.Default);
         }
 
         /// <summary>
-        /// MQTT 收到远程媒体任务后的第一时间响应。
+        /// 当 MQTT 桥接收到 16 字节消息时的统一处理入口，当前仅记录日志供调试使用。
         /// </summary>
-        private void OnRemoteMediaTaskReceived(object? sender, RemoteMediaTask task)
+        /// <param name="sender">事件源。</param>
+        /// <param name="message">定长 MQTT 消息。</param>
+        private void OnMqttPayloadReceived(object? sender, FixedLengthMqttMessage message)
         {
-            AppLogger.Info($"后台线程接收到远程媒体任务: {task.JobId ?? task.Media?.MediaId ?? "未知"}");
-            _ = Task.Run(() => HandleRemoteMediaTaskAsync(task));
+            var hex = Convert.ToHexString(message.Payload.Span); // 十六进制表示
+            AppLogger.Info($"收到 MQTT 16 字节消息，Topic: {message.Topic}, HEX: {hex}");
         }
 
-        /// <summary>
-        /// 处理单个远程媒体任务：优先播放本地缓存，再回落到在线播放并触发缓存。
-        /// </summary>
-        private async Task HandleRemoteMediaTaskAsync(RemoteMediaTask task)
-        {
-            try
-            {
-                AppLogger.Info($"开始处理远程媒体任务，JobId: {task.JobId}, MediaId: {task.Media?.MediaId}");
-                var media = task.Media;
-
-                await Dispatcher.InvokeAsync(() => ShowIncomingMediaNotification(task));
-
-                var cached = await TryGetCachedMediaAsync(media).ConfigureAwait(false);
-                if (!string.IsNullOrEmpty(cached))
-                {
-                    AppLogger.Info($"找到可用的本地缓存，直接播放: {cached}");
-                    await Dispatcher.InvokeAsync(() => PlayFile(cached));
-                    return;
-                }
-
-                var playbackUrl = !string.IsNullOrWhiteSpace(media.AccessibleUrl)
-                    ? media.AccessibleUrl
-                    : media.DownloadUrl;
-
-                if (!string.IsNullOrWhiteSpace(playbackUrl))
-                {
-                    AppLogger.Info($"未命中缓存，先在线播放: {playbackUrl}");
-                    await Dispatcher.InvokeAsync(() => PlayRemoteMedia(playbackUrl!));
-                }
-                else
-                {
-                    AppLogger.Warn("任务中缺失可用的在线播放地址。");
-                }
-
-                AppLogger.Info("开始后台缓存远程媒体文件。");
-                var cacheTask = CacheMediaAsync(task);
-                _ = cacheTask.ContinueWith(async t =>
-                {
-                    if (t.IsFaulted)
-                    {
-                        AppLogger.Error(t.Exception!.GetBaseException(), "后台缓存任务失败。");
-                        return;
-                    }
-
-                    var cachedPath = t.Result;
-                    if (string.IsNullOrEmpty(cachedPath))
-                    {
-                        AppLogger.Warn("后台缓存任务完成但未生成有效文件。");
-                        return;
-                    }
-
-                    AppLogger.Info($"缓存完成，切换为本地播放: {cachedPath}");
-                    await Dispatcher.InvokeAsync(() =>
-                    {
-                        if (!string.IsNullOrEmpty(cachedPath) && File.Exists(cachedPath))
-                        {
-                            PlayFile(cachedPath);
-                        }
-                    });
-                }, TaskScheduler.Default);
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error(ex, "处理远程媒体任务失败。");
-            }
-        }
 
         private void OnPlayerEndReached(object? sender, EventArgs e)
         {
@@ -1324,7 +1271,7 @@ namespace WpfVideoPet
 
                 if (_mqttService != null)
                 {
-                    _mqttService.RemoteMediaTaskReceived -= OnRemoteMediaTaskReceived;
+                    _mqttService.PayloadReceived -= OnMqttPayloadReceived;
 
                     try
                     {
@@ -1340,6 +1287,19 @@ namespace WpfVideoPet
                 _httpClient.Dispose();
                 AppLogger.Info("主窗口关闭，HTTP 客户端资源已释放。");
 
+            }
+
+            if (_mqttBridge != null)
+            {
+                try
+                {
+                    await _mqttBridge.DisposeAsync().ConfigureAwait(false);
+                    AppLogger.Info("MQTT 桥接实例已释放。");
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, $"释放 MQTT 桥接实例时发生异常: {ex.Message}");
+                }
             }
         }
         /// <summary>

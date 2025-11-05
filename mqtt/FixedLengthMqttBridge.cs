@@ -311,8 +311,9 @@ namespace WpfVideoPet.mqtt
                 }
 
                 var buffer = payload.Value.ToArray(); // 接收缓冲区
-                AppLogger.Info($"收到 16 字节 MQTT 消息，主题: {args.ApplicationMessage.Topic}, 内容: {Convert.ToHexString(buffer)}");
-                MessageReceived?.Invoke(this, buffer);
+                var topic = args.ApplicationMessage?.Topic ?? string.Empty; // 消息主题
+                AppLogger.Info($"收到 16 字节 MQTT 消息，主题: {topic}, 内容: {Convert.ToHexString(buffer)}");
+                MessageReceived?.Invoke(this, new FixedLengthMqttMessage(topic, buffer));
             }
             catch (Exception ex)
             {
@@ -320,6 +321,38 @@ namespace WpfVideoPet.mqtt
             }
 
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 表示从 MQTT 收到的 16 字节定长消息，包含原始主题与载荷。
+        /// </summary>
+        public sealed class FixedLengthMqttMessage
+        {
+            /// <summary>
+            /// 使用指定主题与原始载荷初始化消息包装对象。
+            /// </summary>
+            /// <param name="topic">消息主题。</param>
+            /// <param name="payload">长度为 16 字节的原始载荷。</param>
+            public FixedLengthMqttMessage(string topic, byte[] payload)
+            {
+                if (payload == null || payload.Length != 16)
+                {
+                    throw new ArgumentException("MQTT 消息必须是 16 字节长度。", nameof(payload));
+                }
+
+                Topic = topic ?? string.Empty; // 消息主题
+                Payload = new ReadOnlyMemory<byte>(payload); // 原始载荷
+            }
+
+            /// <summary>
+            /// 获取消息所属的 MQTT 主题。
+            /// </summary>
+            public string Topic { get; } // 消息主题
+
+            /// <summary>
+            /// 获取 16 字节的原始载荷内容。
+            /// </summary>
+            public ReadOnlyMemory<byte> Payload { get; } // 原始载荷
         }
     }
 }
