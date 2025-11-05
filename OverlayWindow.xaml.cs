@@ -29,6 +29,7 @@ namespace WpfVideoPet
         private const int WsExTransparent = 0x20; // 允许鼠标穿透样式值
         private const int WsExNoActivate = 0x8000000; // 禁止窗口激活样式值
         private const string ModelFileName = "117.glb"; // 默认模型文件名avatar2.fbx
+//private const string ModelFileName = "117.fbx";
         private const int RenderHeartbeat = 300; // 渲染心跳间隔帧
 
         [DllImport("user32.dll")]
