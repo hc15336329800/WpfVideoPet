@@ -15,7 +15,7 @@ namespace WpfVideoPet.mqtt
     /// 提供精简的 MQTT 通信封装，负责连接、收发与日志记录，不再对载荷长度做任何限制。
     /// 主要职责包括：建立连接、订阅主题、维护自动重连以及向上层转发完整的原始消息。
     /// </summary>
-    public sealed class MqttBridge : IAsyncDisposable
+    public sealed class MqttCoreService : IAsyncDisposable
     {
         private readonly MqttConfig _config; // MQTT 配置
         private readonly MqttFactory _factory = new(); // MQTT 工厂
@@ -27,7 +27,7 @@ namespace WpfVideoPet.mqtt
         /// 初始化 MQTT 桥接服务并记录配置引用，供后续连接与发送使用。
         /// </summary>
         /// <param name="config">MQTT 通信配置，需包含服务器地址与 Topic 信息。</param>
-        public MqttBridge(MqttConfig config)
+        public MqttCoreService(MqttConfig config)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config)); // 配置引用
         }

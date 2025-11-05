@@ -3,7 +3,7 @@ using System.Threading;
 using System.Text;
 using System.Threading.Tasks;
 using WpfVideoPet.mqtt;
-using static WpfVideoPet.mqtt.MqttBridge;
+using static WpfVideoPet.mqtt.MqttCoreService;
 
 namespace WpfVideoPet.service
 {
@@ -12,7 +12,7 @@ namespace WpfVideoPet.service
     /// </summary>
     public sealed class RemoteMediaService : IAsyncDisposable
     {
-        private readonly MqttBridge _bridge; // 16 字节 MQTT 桥
+        private readonly MqttCoreService _bridge; // 16 字节 MQTT 桥
         private readonly EventHandler<FixedLengthMqttMessage> _messageHandler; // 消息回调
         public event EventHandler<FixedLengthMqttMessage>? PayloadReceived;//当收到 MQTT 16 字节消息时触发的事件。
 
@@ -30,7 +30,7 @@ namespace WpfVideoPet.service
         /// 初始化： 不自己创建或管理 MQTT 连接，而是复用一个已经存在的 FixedLengthMqttBridge 实例来收发消息。
         /// </summary>
         /// <param name="bridge">用于维持连接的 MQTT 桥接实例。</param>
-        public RemoteMediaService(MqttBridge bridge)
+        public RemoteMediaService(MqttCoreService bridge)
         {
             _bridge = bridge ?? throw new ArgumentNullException(nameof(bridge));
             _messageHandler = OnBridgeMessageReceived;

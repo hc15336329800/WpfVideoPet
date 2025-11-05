@@ -4,7 +4,7 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using WpfVideoPet.mqtt;
-using static WpfVideoPet.mqtt.MqttBridge;
+using static WpfVideoPet.mqtt.MqttCoreService;
 
 namespace WpfVideoPet.service
 {
@@ -14,7 +14,7 @@ namespace WpfVideoPet.service
     public sealed class SiemensS7Service : IAsyncDisposable
     {
         private readonly PlcConfig _config; // PLC 配置信息
-        private readonly MqttBridge _mqttBridge; // MQTT 桥接实例
+        private readonly MqttCoreService _mqttBridge; // MQTT 桥接实例
         private readonly SemaphoreSlim _plcLock = new(1, 1); // PLC 访问锁
         private readonly EventHandler<MqttBridgeMessage> _controlHandler; // 控制消息处理器
         private Plc? _plc; // PLC 客户端实例
@@ -26,7 +26,7 @@ namespace WpfVideoPet.service
         /// </summary>
         /// <param name="appConfig">应用配置实例。</param>
         /// <param name="mqttBridge">共享的 MQTT 桥接服务。</param>
-        public SiemensS7Service(AppConfig appConfig, MqttBridge mqttBridge)
+        public SiemensS7Service(AppConfig appConfig, MqttCoreService mqttBridge)
             : this(appConfig?.Plc ?? throw new ArgumentNullException(nameof(appConfig)), mqttBridge)
         {
         }
@@ -37,7 +37,7 @@ namespace WpfVideoPet.service
         /// </summary>
         /// <param name="plcConfig">PLC 配置信息。</param>
         /// <param name="mqttBridge">MQTT 桥接服务。</param>
-        public SiemensS7Service(PlcConfig plcConfig, MqttBridge mqttBridge)
+        public SiemensS7Service(PlcConfig plcConfig, MqttCoreService mqttBridge)
         {
             _config = plcConfig ?? throw new ArgumentNullException(nameof(plcConfig));
             _mqttBridge = mqttBridge ?? throw new ArgumentNullException(nameof(mqttBridge));

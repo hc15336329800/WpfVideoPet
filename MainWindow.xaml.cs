@@ -18,7 +18,7 @@ using WpfVideoPet.model;
 using WpfVideoPet.mqtt;
 using WpfVideoPet.service;
 using WpfVideoPet.xunfei;
-using static WpfVideoPet.mqtt.MqttBridge;
+using static WpfVideoPet.mqtt.MqttCoreService;
 
 
 namespace WpfVideoPet
@@ -49,7 +49,7 @@ namespace WpfVideoPet
         private int _userPreferredVolume;
         private readonly AppConfig _appConfig;
         private readonly AudioDuckingConfig _audioDuckingConfig;
-        private MqttBridge? _mqttBridge; // MQTT 桥接实例
+        private MqttCoreService? _mqttBridge; // MQTT 桥接实例
         private RemoteMediaService? _mqttService; // MQTT 任务服务
         private readonly HttpClient _httpClient = new();
         private readonly string _mediaCacheDirectory;
@@ -642,7 +642,7 @@ namespace WpfVideoPet
                 return;
             }
 
-            _mqttBridge ??= new MqttBridge(_appConfig.Mqtt);
+            _mqttBridge ??= new MqttCoreService(_appConfig.Mqtt);
                 _mqttService = new RemoteMediaService(_mqttBridge);
             _mqttService.PayloadReceived += OnMqttPayloadReceived;
 
