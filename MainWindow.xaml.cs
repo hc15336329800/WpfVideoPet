@@ -18,7 +18,7 @@ using WpfVideoPet.model;
 using WpfVideoPet.mqtt;
 using WpfVideoPet.service;
 using WpfVideoPet.xunfei;
-using static WpfVideoPet.mqtt.FixedLengthMqttBridge;
+using static WpfVideoPet.mqtt.MqttBridge;
 
 
 namespace WpfVideoPet
@@ -49,8 +49,8 @@ namespace WpfVideoPet
         private int _userPreferredVolume;
         private readonly AppConfig _appConfig;
         private readonly AudioDuckingConfig _audioDuckingConfig;
-        private FixedLengthMqttBridge? _mqttBridge; // 16 字节 MQTT 桥
-        private RemoteMediaService? _mqttService; // 16 字节 MQTT 任务服务
+        private MqttBridge? _mqttBridge; // MQTT 桥接实例
+        private RemoteMediaService? _mqttService; // MQTT 任务服务
         private readonly HttpClient _httpClient = new();
         private readonly string _mediaCacheDirectory;
         private readonly ConcurrentDictionary<string, Task<string?>> _mediaDownloadTasks = new(StringComparer.OrdinalIgnoreCase);
@@ -642,8 +642,8 @@ namespace WpfVideoPet
                 return;
             }
 
-            _mqttBridge ??= new FixedLengthMqttBridge(_appConfig.Mqtt);
-            _mqttService = new RemoteMediaService(_mqttBridge);
+            _mqttBridge ??= new MqttBridge(_appConfig.Mqtt);
+                _mqttService = new RemoteMediaService(_mqttBridge);
             _mqttService.PayloadReceived += OnMqttPayloadReceived;
 
             _ = _mqttService.StartAsync().ContinueWith(task =>
@@ -655,7 +655,7 @@ namespace WpfVideoPet
                 }
                 else
                 {
-                    AppLogger.Info("MQTT 服务启动完成，等待 16 字节定长消息。");
+                    AppLogger.Info("MQTT 服务启动完成，等待下行消息。");
                 }
             }, TaskScheduler.Default);
         }
@@ -665,10 +665,10 @@ namespace WpfVideoPet
         /// </summary>
         /// <param name="sender">事件源。</param>
         /// <param name="message">定长 MQTT 消息。</param>
-        private void OnMqttPayloadReceived(object? sender, FixedLengthMqttMessage message)
+        private void OnMqttPayloadReceived(object? sender, MqttBridgeMessage message)
         {
             var hex = Convert.ToHexString(message.Payload.Span); // 十六进制表示
-            AppLogger.Info($"收到 MQTT 16 字节消息，Topic: {message.Topic}, HEX: {hex}");
+            AppLogger.Info($"收到 MQTT 消息，Topic: {message.Topic}, 长度: {message.Payload.Length}, HEX: {hex}");
         }
 
 

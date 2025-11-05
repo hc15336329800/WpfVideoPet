@@ -4,19 +4,19 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using WpfVideoPet.mqtt;
-using static WpfVideoPet.mqtt.FixedLengthMqttBridge;
+using static WpfVideoPet.mqtt.MqttBridge;
 
 namespace WpfVideoPet.service
 {
     /// <summary>
-    /// 西门子 S7 PLC 访问服务，提供按需的读写接口，并复用定长 MQTT 桥处理控制消息。
+    /// 西门子 S7 PLC 访问服务，提供按需的读写接口，并复用通用 MQTT 桥处理控制消息。
     /// </summary>
     public sealed class SiemensS7Service : IAsyncDisposable
     {
         private readonly PlcConfig _config; // PLC 配置信息
-        private readonly FixedLengthMqttBridge _mqttBridge; // 16 字节 MQTT 桥
+        private readonly MqttBridge _mqttBridge; // MQTT 桥接实例
         private readonly SemaphoreSlim _plcLock = new(1, 1); // PLC 访问锁
-        private readonly EventHandler<FixedLengthMqttMessage> _controlHandler; // 控制消息处理器
+        private readonly EventHandler<MqttBridgeMessage> _controlHandler; // 控制消息处理器
         private Plc? _plc; // PLC 客户端实例
         private bool _disposed; // 释放标记
         private bool _controlSubscribed; // 控制订阅状态
@@ -25,18 +25,19 @@ namespace WpfVideoPet.service
         /// 使用应用配置和共享 MQTT 桥接实例初始化服务。
         /// </summary>
         /// <param name="appConfig">应用配置实例。</param>
-        /// <param name="mqttBridge">共享的 16 字节 MQTT 桥接服务。</param>
-        public SiemensS7Service(AppConfig appConfig, FixedLengthMqttBridge mqttBridge)
+        /// <param name="mqttBridge">共享的 MQTT 桥接服务。</param>
+        public SiemensS7Service(AppConfig appConfig, MqttBridge mqttBridge)
             : this(appConfig?.Plc ?? throw new ArgumentNullException(nameof(appConfig)), mqttBridge)
         {
         }
+
 
         /// <summary>
         /// 使用指定的 PLC 配置与 MQTT 桥接服务初始化实例。
         /// </summary>
         /// <param name="plcConfig">PLC 配置信息。</param>
         /// <param name="mqttBridge">MQTT 桥接服务。</param>
-        public SiemensS7Service(PlcConfig plcConfig, FixedLengthMqttBridge mqttBridge)
+        public SiemensS7Service(PlcConfig plcConfig, MqttBridge mqttBridge)
         {
             _config = plcConfig ?? throw new ArgumentNullException(nameof(plcConfig));
             _mqttBridge = mqttBridge ?? throw new ArgumentNullException(nameof(mqttBridge));
@@ -291,7 +292,7 @@ namespace WpfVideoPet.service
         /// </summary>
         /// <param name="sender">事件源。</param>
         /// <param name="message">定长消息内容。</param>
-        private void OnControlMessageReceived(object? sender, FixedLengthMqttMessage message)
+        private void OnControlMessageReceived(object? sender, MqttBridgeMessage message)
         {
             if (_disposed)
             {

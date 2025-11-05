@@ -12,10 +12,10 @@ using System.Threading.Tasks;
 namespace WpfVideoPet.mqtt
 {
     /// <summary>
-    /// 提供最精简的 16 字节 MQTT 通信框架，负责连接、收发与日志记录。
-    /// 处理：连接、订阅、重连这些底层细节
+    /// 提供精简的 MQTT 通信封装，负责连接、收发与日志记录，不再对载荷长度做任何限制。
+    /// 主要职责包括：建立连接、订阅主题、维护自动重连以及向上层转发完整的原始消息。
     /// </summary>
-    public sealed class FixedLengthMqttBridge : IAsyncDisposable
+    public sealed class MqttBridge : IAsyncDisposable
     {
         private readonly MqttConfig _config; // MQTT 配置
         private readonly MqttFactory _factory = new(); // MQTT 工厂
@@ -24,10 +24,10 @@ namespace WpfVideoPet.mqtt
         private bool _disposed; // 释放标记
 
         /// <summary>
-        /// 初始化 16 字节 MQTT 桥接服务，并记录配置引用供后续使用。
+        /// 初始化 MQTT 桥接服务并记录配置引用，供后续连接与发送使用。
         /// </summary>
         /// <param name="config">MQTT 通信配置，需包含服务器地址与 Topic 信息。</param>
-        public FixedLengthMqttBridge(MqttConfig config)
+        public MqttBridge(MqttConfig config)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config)); // 配置引用
         }
@@ -42,18 +42,15 @@ namespace WpfVideoPet.mqtt
         }
 
         /// <summary>
-        /// 发送固定 16 字节的原始数据到指定主题，默认使用上行主题。
+        /// 发送原始二进制数据到指定主题，默认使用配置中的上行主题。
         /// </summary>
-        /// <param name="payload">待发送的数据，必须正好 16 字节。</param>
+        /// <param name="payload">待发送的原始二进制数据。</param>
         /// <param name="topic">可选的自定义主题，缺省为配置中的上行主题。</param>
         /// <param name="retain">是否设置保留标记。</param>
         /// <param name="cancellationToken">外部取消令牌。</param>
         public async Task SendAsync(ReadOnlyMemory<byte> payload, string? topic = null, bool retain = false, CancellationToken cancellationToken = default)
         {
-            if (payload.Length != 16)
-            {
-                throw new ArgumentException("发送的数据必须是 16 字节。", nameof(payload));
-            }
+            
 
             if (_disposed || !_config.Enabled)
             {
@@ -76,53 +73,29 @@ namespace WpfVideoPet.mqtt
 
             var message = new MqttApplicationMessageBuilder() // MQTT 消息构建器
                 .WithTopic(targetTopic)
-                 .WithPayload(payload.ToArray()) // 将 ReadOnlyMemory<byte> 转为 byte[]
+                .WithPayload(payload.ToArray()) // 将 ReadOnlyMemory<byte> 转为 byte[]
                 .WithRetainFlag(retain)
                 .WithQualityOfServiceLevel((MqttQualityOfServiceLevel)Math.Clamp(_config.Qos, 0, 2))
                 .Build();
 
             await _client.PublishAsync(message, cancellationToken).ConfigureAwait(false);
-            AppLogger.Info($"已发送 16 字节 MQTT 消息，主题: {targetTopic}, 内容: {Convert.ToHexString(payload.Span)}");
+            AppLogger.Info($"已发送 MQTT 消息，主题: {targetTopic}, 长度: {payload.Length}, 内容: {Convert.ToHexString(payload.Span)}");
         }
 
         /// <summary>
-        /// 将字符串按指定编码转换为 16 字节发送，不足补齐，超出截断。
+        /// 将字符串按指定编码转换为原始字节后发送，保持完整内容。
         /// </summary>
         /// <param name="text">待发送的字符串内容。</param>
         /// <param name="encoding">转换所用编码，默认 UTF-8。</param>
-        /// <param name="padding">补齐字节值，默认 0x00。</param>
         /// <param name="topic">可选的自定义主题。</param>
         /// <param name="retain">是否设置保留标记。</param>
         /// <param name="cancellationToken">外部取消令牌。</param>
-        public async Task SendStringAsync(string text, Encoding? encoding = null, byte padding = 0x00, string? topic = null, bool retain = false, CancellationToken cancellationToken = default)
+        public async Task SendStringAsync(string text, Encoding? encoding = null, string? topic = null, bool retain = false, CancellationToken cancellationToken = default)
         {
             encoding ??= Encoding.UTF8; // 字符串编码
             var input = text ?? string.Empty; // 待编码字符串
-            var buffer = ArrayPool<byte>.Shared.Rent(16); // 可重用缓冲区
-            try
-            {
-                Array.Clear(buffer, 0, 16);
-                var encoded = encoding.GetBytes(input); // 编码后的字节
-                var copyLength = Math.Min(16, encoded.Length); // 需要复制的长度
-                Array.Copy(encoded, buffer, copyLength);
-                if (copyLength < 16)
-                {
-                    for (var i = copyLength; i < 16; i++)
-                    {
-                        buffer[i] = padding;
-                    }
-                }
-                else if (encoded.Length > 16)
-                {
-                    AppLogger.Warn($"字符串超出 16 字节限制，已截断发送: {input}");
-                }
-
-                await SendAsync(buffer.AsMemory(0, 16), topic, retain, cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
-            }
+            var encoded = encoding.GetBytes(input); // 编码后的字节
+            await SendAsync(encoded, topic, retain, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -161,9 +134,9 @@ namespace WpfVideoPet.mqtt
         }
 
         /// <summary>
-        /// 当收到 MQTT 消息时触发，将符合长度的 16 字节数据上抛给业务层。
+        /// 当收到 MQTT 消息时触发，将完整载荷上抛给业务层。
         /// </summary>
-        public event EventHandler<FixedLengthMqttMessage>? MessageReceived;
+        public event EventHandler<MqttBridgeMessage>? MessageReceived;
 
         /// <summary>
         /// 建立连接并订阅默认下行主题，避免重复连接。
@@ -291,7 +264,7 @@ namespace WpfVideoPet.mqtt
         }
 
         /// <summary>
-        /// 处理收到的 MQTT 消息，过滤并上抛 16 字节数据包。
+        /// 处理收到的 MQTT 消息，将原始载荷转换后交给上层处理。
         /// </summary>
         /// <param name="args">消息参数。</param>
         /// <returns>异步任务。</returns>
@@ -300,21 +273,15 @@ namespace WpfVideoPet.mqtt
             try
             {
                 var payload = args.ApplicationMessage?.PayloadSegment; // 消息负载
-                if (payload == null || payload.Value.Count == 0)
+                if (payload == null)
                 {
-                    return Task.CompletedTask;
-                }
-
-                if (payload.Value.Count != 16)
-                {
-                    AppLogger.Warn($"收到非 16 字节消息，长度: {payload.Value.Count}，已忽略。");
                     return Task.CompletedTask;
                 }
 
                 var buffer = payload.Value.ToArray(); // 接收缓冲区
                 var topic = args.ApplicationMessage?.Topic ?? string.Empty; // 消息主题
-                AppLogger.Info($"收到 16 字节 MQTT 消息，主题: {topic}, 内容: {Convert.ToHexString(buffer)}");
-                MessageReceived?.Invoke(this, new FixedLengthMqttMessage(topic, buffer));
+                AppLogger.Info($"收到 MQTT 消息，主题: {topic}, 长度: {buffer.Length}, 内容: {Convert.ToHexString(buffer)}");
+                MessageReceived?.Invoke(this, new MqttBridgeMessage(topic, buffer));
             }
             catch (Exception ex)
             {
@@ -325,24 +292,19 @@ namespace WpfVideoPet.mqtt
         }
 
         /// <summary>
-        /// 表示从 MQTT 收到的 16 字节定长消息，包含原始主题与载荷。
+        /// 表示从 MQTT 收到的完整消息，包含原始主题与载荷。
         /// </summary>
-        public sealed class FixedLengthMqttMessage
+        public sealed class MqttBridgeMessage
         {
             /// <summary>
             /// 使用指定主题与原始载荷初始化消息包装对象。
             /// </summary>
             /// <param name="topic">消息主题。</param>
-            /// <param name="payload">长度为 16 字节的原始载荷。</param>
-            public FixedLengthMqttMessage(string topic, byte[] payload)
+            /// <param name="payload">任意长度的原始载荷。</param>
+            public MqttBridgeMessage(string topic, byte[] payload)
             {
-                if (payload == null || payload.Length != 16)
-                {
-                    throw new ArgumentException("MQTT 消息必须是 16 字节长度。", nameof(payload));
-                }
-
                 Topic = topic ?? string.Empty; // 消息主题
-                Payload = new ReadOnlyMemory<byte>(payload); // 原始载荷
+                Payload = new ReadOnlyMemory<byte>(payload ?? Array.Empty<byte>()); // 原始载荷
             }
 
             /// <summary>
@@ -351,7 +313,7 @@ namespace WpfVideoPet.mqtt
             public string Topic { get; } // 消息主题
 
             /// <summary>
-            /// 获取 16 字节的原始载荷内容。
+            /// 获取原始载荷内容。
             /// </summary>
             public ReadOnlyMemory<byte> Payload { get; } // 原始载荷
         }
