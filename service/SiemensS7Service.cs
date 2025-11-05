@@ -1,10 +1,6 @@
-﻿using HandyControl.Data;
-using S7.Net;
+﻿using S7.Net;
 using System;
-using System.Buffers;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using WpfVideoPet.mqtt;
@@ -13,20 +9,17 @@ using static WpfVideoPet.mqtt.FixedLengthMqttBridge;
 namespace WpfVideoPet.service
 {
     /// <summary>
-    /// 西门子 S7 PLC 轮询与控制服务 
+    /// 西门子 S7 PLC 访问服务，提供按需的读写接口，并复用定长 MQTT 桥处理控制消息。
     /// </summary>
     public sealed class SiemensS7Service : IAsyncDisposable
     {
         private readonly PlcConfig _config; // PLC 配置信息
         private readonly FixedLengthMqttBridge _mqttBridge; // 16 字节 MQTT 桥
-        private readonly SemaphoreSlim _plcLock = new(1, 1); // PLC 连接锁
+        private readonly SemaphoreSlim _plcLock = new(1, 1); // PLC 访问锁
         private readonly EventHandler<FixedLengthMqttMessage> _controlHandler; // 控制消息处理器
-        private CancellationTokenSource? _pollingCts; // 轮询任务取消源
-        private Task? _pollingTask; // 轮询后台任务
         private Plc? _plc; // PLC 客户端实例
-        private bool _disposed; // 释放状态标记
-        private bool _initialStateLogged; // 是否已输出初始化日志
-        private bool _controlSubscribed; // 是否已挂载控制回调
+        private bool _disposed; // 释放标记
+        private bool _controlSubscribed; // 控制订阅状态
 
         /// <summary>
         /// 使用应用配置和共享 MQTT 桥接实例初始化服务。
@@ -41,7 +34,7 @@ namespace WpfVideoPet.service
         /// <summary>
         /// 使用指定的 PLC 配置与 MQTT 桥接服务初始化实例。
         /// </summary>
-        /// <param name="plcConfig">PLC 配置。</param>
+        /// <param name="plcConfig">PLC 配置信息。</param>
         /// <param name="mqttBridge">MQTT 桥接服务。</param>
         public SiemensS7Service(PlcConfig plcConfig, FixedLengthMqttBridge mqttBridge)
         {
@@ -51,9 +44,8 @@ namespace WpfVideoPet.service
             AppLogger.Info($"Siemens S7 服务初始化: IP={_config.IpAddress}, Rack={_config.Rack}, Slot={_config.Slot}, CPU={_config.CpuType ?? "未指定"}");
         }
 
-
         /// <summary>
-        /// 启动后台轮询任务，并订阅控制主题。
+        /// 启动 PLC 服务：按需建立 MQTT 连接并订阅控制主题，同时确保 PLC 可以在首次访问前准备就绪。
         /// </summary>
         /// <param name="cancellationToken">外部取消令牌。</param>
         public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -66,12 +58,6 @@ namespace WpfVideoPet.service
             if (!_config.Enabled)
             {
                 AppLogger.Info("Siemens S7 服务配置为禁用状态，跳过启动请求。");
-                return;
-            }
-
-            if (_pollingTask != null)
-            {
-                AppLogger.Info("Siemens S7 服务检测到重复启动请求，已忽略。");
                 return;
             }
 
@@ -88,18 +74,11 @@ namespace WpfVideoPet.service
                 AppLogger.Warn("未配置 PLC 控制订阅主题，控制指令将被忽略。");
             }
 
-            AppLogger.Info("Siemens S7 服务开始启动后台轮询任务。");
-
-            _pollingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            _pollingTask = Task.Run(async () => await RunPollingLoopAsync(_pollingCts.Token).ConfigureAwait(false));
-            AppLogger.Info("Siemens S7 服务已调度后台轮询任务。");
-
+            await EnsurePlcConnectedAsync(cancellationToken).ConfigureAwait(false);
         }
 
-
-
         /// <summary>
-        /// 停止后台轮询并释放资源。
+        /// 停止 PLC 服务，解除 MQTT 回调并断开 PLC 连接。
         /// </summary>
         public async Task StopAsync()
         {
@@ -107,30 +86,6 @@ namespace WpfVideoPet.service
             {
                 return;
             }
-
-            var cts = _pollingCts;
-            if (cts != null)
-            {
-                cts.Cancel();
-                try
-                {
-                    if (_pollingTask != null)
-                    {
-                        await _pollingTask.ConfigureAwait(false);
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    // 忽略取消异常。
-                }
-                finally
-                {
-                    cts.Dispose();
-                }
-            }
-
-            _pollingCts = null;
-            _pollingTask = null;
 
             if (_controlSubscribed)
             {
@@ -140,7 +95,64 @@ namespace WpfVideoPet.service
 
             await ClosePlcAsync().ConfigureAwait(false);
             AppLogger.Info("Siemens S7 服务已停止并关闭 PLC 连接。");
+        }
 
+        /// <summary>
+        /// 读取配置中状态区域的原始字节数据，供外部按需获取 PLC 当前状态。
+        /// </summary>
+        /// <param name="cancellationToken">外部取消令牌。</param>
+        /// <returns>状态区域的原始字节数组。</returns>
+        public Task<byte[]> ReadStatusAreaAsync(CancellationToken cancellationToken = default)
+        {
+            if (_config.StatusArea == null)
+            {
+                return Task.FromResult(Array.Empty<byte>());
+            }
+
+            return ReadAreaAsync(_config.StatusArea, cancellationToken);
+        }
+
+        /// <summary>
+        /// 按指定区域从 PLC 读取原始字节数据，调用者可以自行解释返回内容。
+        /// </summary>
+        /// <param name="area">目标数据区域配置。</param>
+        /// <param name="cancellationToken">外部取消令牌。</param>
+        /// <returns>指定区域的原始字节数组。</returns>
+        public async Task<byte[]> ReadAreaAsync(PlcAreaConfig area, CancellationToken cancellationToken = default)
+        {
+            if (area == null)
+            {
+                throw new ArgumentNullException(nameof(area));
+            }
+
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(SiemensS7Service));
+            }
+
+            if (!_config.Enabled)
+            {
+                return Array.Empty<byte>();
+            }
+
+            await EnsurePlcConnectedAsync(cancellationToken).ConfigureAwait(false);
+
+            await _plcLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (_plc == null)
+                {
+                    return Array.Empty<byte>();
+                }
+
+                return await Task.Run(() =>
+                    _plc.ReadBytes(DataType.DataBlock, area.DbNumber, area.StartByte, area.ByteLength) ?? Array.Empty<byte>(),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _plcLock.Release();
+            }
         }
 
         /// <summary>
@@ -161,7 +173,8 @@ namespace WpfVideoPet.service
                 return;
             }
 
-            var maxBits = _config.ControlArea.ByteLength * 8;
+            var area = _config.ControlArea;
+            var maxBits = area.ByteLength * 8;
             if (bitIndex < 0 || bitIndex >= maxBits)
             {
                 throw new ArgumentOutOfRangeException(nameof(bitIndex), $"位索引超出范围: 0-{maxBits - 1}");
@@ -177,12 +190,12 @@ namespace WpfVideoPet.service
                     return;
                 }
 
-                var area = _config.ControlArea;
-                var byteOffset = bitIndex / 8;
-                var bitOffset = (byte)(bitIndex % 8);
-                var targetByte = area.StartByte + byteOffset;
+                var byteOffset = bitIndex / 8; // 目标字节偏移
+                var bitOffset = (byte)(bitIndex % 8); // 位偏移量
+                var targetByte = area.StartByte + byteOffset; // 实际字节地址
 
-                await Task.Run(() => _plc!.WriteBit(DataType.DataBlock, area.DbNumber, targetByte, bitOffset, value), cancellationToken).ConfigureAwait(false);
+                await Task.Run(() => _plc!.WriteBit(DataType.DataBlock, area.DbNumber, targetByte, bitOffset, value), cancellationToken)
+                    .ConfigureAwait(false);
             }
             finally
             {
@@ -191,7 +204,7 @@ namespace WpfVideoPet.service
         }
 
         /// <summary>
-        /// 释放所占资源。
+        /// 释放所占资源，并在必要时记录释放过程中的异常信息。
         /// </summary>
         public async ValueTask DisposeAsync()
         {
@@ -201,124 +214,26 @@ namespace WpfVideoPet.service
             }
 
             _disposed = true;
-            await StopAsync().ConfigureAwait(false);
-            _plcLock.Dispose();
-        }
-
-        /// <summary>
-        /// 执行 PLC 数据轮询主循环。
-        /// </summary>
-        /// <param name="cancellationToken">取消令牌。</param>
-        private async Task RunPollingLoopAsync(CancellationToken cancellationToken)
-        {
-            var delay = TimeSpan.FromMilliseconds(Math.Max(100, _config.PollingIntervalMilliseconds));
-
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                try
-                {
-                    await EnsurePlcConnectedAsync(cancellationToken).ConfigureAwait(false);
-
-                    if (_plc == null || !_plc.IsConnected)
-                    {
-                        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    var area = _config.StatusArea;
-                    var bytes = await ReadStatusBytesAsync(area, cancellationToken).ConfigureAwait(false);
-                    if (bytes.Length == 0)
-                    {
-                        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    var bits = ExtractBits(bytes, area.ByteLength * 8);
-                    Console.WriteLine($"[PLC] DB{area.DbNumber} 起始{area.StartByte} 字节 {BitConverter.ToString(bytes)} Bits: {string.Join(',', bits.Select(b => b ? 1 : 0))}");
-
-                    await PublishStatusAsync(area, bytes, cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"PLC 轮询失败: {ex.Message}");
-                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
-                }
-
-                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        /// <summary>
-        /// 将轮询结果发布到 MQTT 主题。
-        /// </summary>
-        /// <param name="area">数据区域配置。</param>
-        /// <param name="bytes">原始字节数据。</param>
-        /// <param name="cancellationToken">取消令牌。</param>
-        private async Task PublishStatusAsync(PlcAreaConfig area, byte[] bytes, CancellationToken cancellationToken)
-        {
-            if (string.IsNullOrWhiteSpace(_config.StatusPublishTopic))
-            {
-                return;
-            }
-
-            var buffer = ArrayPool<byte>.Shared.Rent(16); // MQTT 发送缓冲区
             try
             {
-                Array.Clear(buffer, 0, 16);
-                var copyLength = Math.Min(16, bytes.Length);
-                Array.Copy(bytes, buffer, copyLength);
-
-                if (copyLength < 16)
-                {
-                    for (var i = copyLength; i < 16; i++)
-                    {
-                        buffer[i] = 0x00;
-                    }
-                }
-
-                await _mqttBridge.SendAsync(buffer.AsMemory(0, 16), _config.StatusPublishTopic, false, cancellationToken).ConfigureAwait(false);
+                await StopAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, "释放 Siemens S7 服务时发生异常。");
             }
             finally
             {
-                ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+                _plcLock.Dispose();
             }
         }
 
-
         /// <summary>
-        /// 从 PLC 读取指定区域的原始字节数据。
+        /// 确保 PLC 连接可用，必要时自动创建并打开连接。
         /// </summary>
-        /// <param name="area">数据区域配置。</param>
-        /// <param name="cancellationToken">取消令牌。</param>
-        /// <returns>读取到的字节数组。</returns>
-        private async Task<byte[]> ReadStatusBytesAsync(PlcAreaConfig area, CancellationToken cancellationToken)
-        {
-            await _plcLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                if (_plc == null)
-                {
-                    return Array.Empty<byte>();
-                }
-
-                return await Task.Run(() => _plc.ReadBytes(DataType.DataBlock, area.DbNumber, area.StartByte, area.ByteLength) ?? Array.Empty<byte>(), cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                _plcLock.Release();
-            }
-        }
-        /// <summary>
-        /// 确保 PLC 连接可用，必要时自动重连。
-        /// </summary>
-        /// <param name="cancellationToken">取消令牌。</param>
+        /// <param name="cancellationToken">外部取消令牌。</param>
         private async Task EnsurePlcConnectedAsync(CancellationToken cancellationToken)
         {
-            var shouldLog = false; // 是否需要输出初始化日志
             if (_plc != null && _plc.IsConnected)
             {
                 return;
@@ -336,21 +251,12 @@ namespace WpfVideoPet.service
                 if (!_plc!.IsConnected)
                 {
                     await Task.Run(() => _plc.Open(), cancellationToken).ConfigureAwait(false);
-                }
-
-                if (_plc.IsConnected && !_initialStateLogged)
-                {
-                    shouldLog = true;
+                    AppLogger.Info("Siemens S7 服务已建立 PLC 连接。");
                 }
             }
             finally
             {
                 _plcLock.Release();
-            }
-
-            if (shouldLog)
-            {
-                await LogInitialPlcStateAsync(cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -367,6 +273,7 @@ namespace WpfVideoPet.service
                     if (_plc.IsConnected)
                     {
                         _plc.Close();
+                        AppLogger.Info("Siemens S7 服务已断开 PLC 连接。");
                     }
 
                     (_plc as IDisposable)?.Dispose();
@@ -376,65 +283,6 @@ namespace WpfVideoPet.service
             finally
             {
                 _plcLock.Release();
-            }
-        }
-        /// <summary>
-        /// 在 PLC 首次连接后记录初始化信息，并读取 DB100 的首字节作为连通性测试。
-        /// </summary>
-        /// <param name="cancellationToken">取消令牌，用于在应用停止时打断测试读取。</param>
-        private async Task LogInitialPlcStateAsync(CancellationToken cancellationToken)
-        {
-            if (_initialStateLogged)
-            {
-                return;
-            }
-
-            AppLogger.Info("Siemens S7 服务已建立连接，准备读取 DB100[0] 进行初始化验证。");
-
-            try
-            {
-                byte[] data; // PLC 返回的原始字节
-
-
-                await _plcLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-                try
-                {
-                    if (_plc == null || !_plc.IsConnected)
-                    {
-                        AppLogger.Warn("PLC 在初始化验证时未保持连接，跳过 DB100 测试读取。");
-                        return;
-                    }
-
-                    data = await Task.Run(() => _plc.ReadBytes(DataType.DataBlock, 100, 0, 1) ?? Array.Empty<byte>(), cancellationToken).ConfigureAwait(false);
-                }
-                finally
-                {
-                    _plcLock.Release();
-                }
-                if (data.Length > 0)
-                {
-                    var dbByte = data[0]; // DB100[0] 的字节值
-                    var hexText = dbByte.ToString("X2"); // 十六进制文本
-                    var decimalValue = dbByte; // 十进制数值
-                    AppLogger.Info($"Siemens S7 服务初始化验证完成，DB100[0] = 0x{hexText} ({decimalValue})");
-                }
-                else
-                {
-                    AppLogger.Warn("Siemens S7 服务初始化验证未读取到 DB100 字节数据。");
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                AppLogger.Warn("初始化阶段读取 DB100 被取消。");
-                throw;
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error(ex, "初始化阶段读取 DB100 失败。");
-            }
-            finally
-            {
-                _initialStateLogged = true;
             }
         }
 
@@ -481,7 +329,6 @@ namespace WpfVideoPet.service
             });
         }
 
-
         /// <summary>
         /// 将配置中的 CPU 字符串解析为枚举。
         /// </summary>
@@ -495,30 +342,5 @@ namespace WpfVideoPet.service
 
             return CpuType.S71200;
         }
-
-        /// <summary>
-        /// 将字节数组转换为位数组，按低位在前的顺序展开。
-        /// </summary>
-        /// <param name="bytes">原始字节序列。</param>
-        /// <param name="bitCount">预期的位数量。</param>
-        /// <returns>展开后的位数组。</returns>
-        private static bool[] ExtractBits(IReadOnlyList<byte> bytes, int bitCount)
-        {
-            var result = new bool[bitCount];
-            var index = 0;
-
-            foreach (var value in bytes)
-            {
-                for (var bit = 0; bit < 8 && index < result.Length; bit++)
-                {
-                    result[index++] = (value >> bit & 0x01) == 0x01;
-                }
-            }
-
-            return result;
-        }
-
-        // 控制与状态简化为 16 字节协议，暂不需要额外的数据结构。
-
     }
 }

@@ -163,7 +163,7 @@ namespace WpfVideoPet.mqtt
         /// <summary>
         /// 当收到 MQTT 消息时触发，将符合长度的 16 字节数据上抛给业务层。
         /// </summary>
-        public event EventHandler<ReadOnlyMemory<byte>>? MessageReceived;
+        public event EventHandler<FixedLengthMqttMessage>? MessageReceived;
 
         /// <summary>
         /// 建立连接并订阅默认下行主题，避免重复连接。

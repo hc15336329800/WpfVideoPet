@@ -18,6 +18,8 @@ using WpfVideoPet.model;
 using WpfVideoPet.mqtt;
 using WpfVideoPet.service;
 using WpfVideoPet.xunfei;
+using static WpfVideoPet.mqtt.FixedLengthMqttBridge;
+
 
 namespace WpfVideoPet
 {

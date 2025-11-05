@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Threading;
+using System.Text;
 using System.Threading.Tasks;
 using WpfVideoPet.mqtt;
 using static WpfVideoPet.mqtt.FixedLengthMqttBridge;
@@ -19,7 +20,7 @@ namespace WpfVideoPet.service
         private bool _disposed; // 释放状态
 
         // [常量] 监听与发送的固定主题
-        private const string ListenTopic117 = "117"; // 收到该主题时在控制台输出“117”
+        private const string ListenTopic117 = "ts_lanmao001"; // 收到该主题时在控制台输出“117”
         private const string SendTopic118 = "118"; // 向该主题发送 "helloworld"
 
  
@@ -37,15 +38,26 @@ namespace WpfVideoPet.service
 
         //*************************************接收消息*********************************************
 
-        // [回调逻辑] 在收到桥接消息时，若 topic == "117"，控制台输出“117”
+ 
+        /// <summary>
+        /// 当共享 MQTT 桥收到 16 字节消息时触发，输出主题和文本内容，并透传给订阅者。
+        /// [回调逻辑] 在收到桥接消息时，若 topic == "117"，控制台输出“117”
+        /// </summary>
+        /// <param name="sender">事件源。</param>
+        /// <param name="message">桥接推送的定长 MQTT 消息。</param>
         private void OnBridgeMessageReceived(object? sender, FixedLengthMqttMessage message)
         {
             if (_disposed) return;
 
+            var payloadText = Encoding.UTF8.GetString(message.Payload.Span).TrimEnd('\0'); // 消息内容文本
+            Console.WriteLine($"收到 MQTT 消息 -> Topic: {message.Topic}, 内容: {payloadText}");
+
             // [新增] 仅当主题为 117 时输出
             if (message.Topic == ListenTopic117)
             {
-                Console.WriteLine("117"); // 控制台输出
+                Console.WriteLine($"收到 主题为 117 消息 -> Topic: {message.Topic}, 内容: {payloadText}"); // 控制台输出
+                AppLogger.Info($"收到 主题为 117 消息 -> Topic: {message.Topic}, 内容: {payloadText}");
+
             }
 
             PayloadReceived?.Invoke(this, message);
