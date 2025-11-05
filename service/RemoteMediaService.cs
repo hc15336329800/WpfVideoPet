@@ -11,7 +11,8 @@ using static WpfVideoPet.mqtt.MqttCoreService;
 namespace WpfVideoPet.service
 {
     /// <summary>
-    /// 负责监听 MQTT 下发的远程媒体任务，解析 JSON 载荷并向上层发布业务事件。
+    /// 负责监听 MQTT 下发的远程媒体任务，解析 JSON 载荷并向上层发布业务事件。 
+    /// 2020-11-05 测试成功
     /// </summary>
     public sealed class RemoteMediaService : IAsyncDisposable
     {
