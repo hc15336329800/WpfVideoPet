@@ -18,8 +18,7 @@ using WpfVideoPet.model;
 using WpfVideoPet.mqtt;
 using WpfVideoPet.service;
 using WpfVideoPet.xunfei;
-using static WpfVideoPet.mqtt.MqttCoreService;
-
+ 
 
 namespace WpfVideoPet
 {
@@ -643,8 +642,8 @@ namespace WpfVideoPet
             }
 
             _mqttBridge ??= new MqttCoreService(_appConfig.Mqtt);
-                _mqttService = new RemoteMediaService(_mqttBridge);
-            _mqttService.PayloadReceived += OnMqttPayloadReceived;
+            _mqttService = new RemoteMediaService(_mqttBridge);
+            _mqttService.RemoteMediaReceived += OnRemoteMediaTaskReceived;
 
             _ = _mqttService.StartAsync().ContinueWith(task =>
             {
@@ -661,15 +660,56 @@ namespace WpfVideoPet
         }
 
         /// <summary>
-        /// 当 MQTT 桥接收到 16 字节消息时的统一处理入口，当前仅记录日志供调试使用。
+        /// 当远程媒体任务到达时触发，优先调度缓存下载并在界面播放。
         /// </summary>
         /// <param name="sender">事件源。</param>
-        /// <param name="message">定长 MQTT 消息。</param>
-        private void OnMqttPayloadReceived(object? sender, MqttBridgeMessage message)
+        /// <param name="e">远程媒体任务事件参数。</param>
+        private async void OnRemoteMediaTaskReceived(object? sender, RemoteMediaReceivedEventArgs e)
         {
-            var hex = Convert.ToHexString(message.Payload.Span); // 十六进制表示
-            AppLogger.Info($"收到 MQTT 消息，Topic: {message.Topic}, 长度: {message.Payload.Length}, HEX: {hex}");
+            AppLogger.Info($"收到远程媒体任务，Topic: {e.RawMessage.Topic}, JobId: {e.Task.JobId}, 状态: {e.Task.JobStatus ?? "未知"}, JobType: {e.JobType ?? "未提供"}。");
+            AppLogger.Info($"远程媒体任务原始 JSON: {e.RawJson}");
+
+            try
+            {
+                await Dispatcher.InvokeAsync(() => ShowIncomingMediaNotification(e.Task));
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, "展示远程媒体提示时发生异常。");
+            }
+
+            var media = e.Task.Media; // 媒体描述
+            string? cachePath = null; // 本地缓存路径
+
+            try
+            {
+                cachePath = await CacheMediaAsync(e.Task).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, $"缓存远程媒体任务失败: {e.Task.JobId}");
+            }
+
+            if (!string.IsNullOrEmpty(cachePath))
+            {
+                AppLogger.Info($"准备播放本地缓存媒体: {cachePath}");
+                Dispatcher.InvokeAsync(() => PlayFile(cachePath));
+                return;
+            }
+
+            var remoteUrl = !string.IsNullOrWhiteSpace(media.DownloadUrl) ? media.DownloadUrl : media.AccessibleUrl; // 备用远程地址
+            if (!string.IsNullOrWhiteSpace(remoteUrl))
+            {
+                AppLogger.Info($"缓存暂不可用，切换为在线播放: {remoteUrl}");
+                Dispatcher.InvokeAsync(() => PlayRemoteMedia(remoteUrl));
+            }
+            else
+            {
+                AppLogger.Warn($"远程媒体任务缺少可播放地址，JobId: {e.Task.JobId}");
+            }
         }
+
+
 
 
         private void OnPlayerEndReached(object? sender, EventArgs e)
@@ -1273,7 +1313,7 @@ namespace WpfVideoPet
 
                 if (_mqttService != null)
                 {
-                    _mqttService.PayloadReceived -= OnMqttPayloadReceived;
+                    _mqttService.RemoteMediaReceived -= OnRemoteMediaTaskReceived;
 
                     try
                     {
