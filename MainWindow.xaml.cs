@@ -227,7 +227,7 @@ namespace WpfVideoPet
             {
                 if (_overlay == null)
                 {
-                    _overlay = new OverlayWindow
+                    _overlay = new OverlayWindow(_appConfig)
                     {
                         WindowStartupLocation = WindowStartupLocation.Manual
                     };

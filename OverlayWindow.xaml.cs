@@ -29,8 +29,10 @@ namespace WpfVideoPet
         private const int WsExTransparent = 0x20; // 允许鼠标穿透样式值
         private const int WsExNoActivate = 0x8000000; // 禁止窗口激活样式值
         private const string ModelFileName = "117.glb"; // 默认模型文件名avatar2.fbx
-//private const string ModelFileName = "117.fbx";
+                                                        //private const string ModelFileName = "117.fbx";
         private const int RenderHeartbeat = 300; // 渲染心跳间隔帧
+        private const float DefaultAnimationFrameRate = 30f; // 默认动画帧率
+        private const float MinimumAnimationFrameRate = 1f; // 允许配置的最低动画
 
         [DllImport("user32.dll")]
         private static extern int GetWindowLong(IntPtr hWnd, int nIndex); // 获取窗口样式
@@ -48,6 +50,9 @@ namespace WpfVideoPet
         private bool _isAnimationPlaying; // 动画是否播放
         private long _animationStartTicks; // 动画起始时间刻度
 
+        private readonly float _targetAnimationFrameRate; // 动画目标帧率
+        private readonly bool _useFixedFrameRate; // 是否启用固定帧率节拍
+        private int _lastAnimationFrameIndex; // 上一次应用的帧序号
         private RenderHostDX? _renderHost; // DX11 渲染宿主
         private ViewportCore? _viewportCore; // ViewportCore 管理器
         private ImageSourceDX? _imageSource; // 输出图像源
@@ -58,13 +63,26 @@ namespace WpfVideoPet
         /// <summary>
         /// 初始化覆盖层窗口，订阅生命周期事件并准备 Core 渲染环境。
         /// </summary>
-        public OverlayWindow()
+        public OverlayWindow(AppConfig? config = null)
         {
             InitializeComponent();
+            var configuredRate = config?.OverlayAnimationFrameRate ?? DefaultAnimationFrameRate; // 读取配置中的帧率
+            if (configuredRate <= 0f)
+            {
+                _targetAnimationFrameRate = DefaultAnimationFrameRate; // 退回默认值
+                _useFixedFrameRate = false; // 不强制固定节拍
+            }
+            else
+            {
+                _targetAnimationFrameRate = Math.Max(MinimumAnimationFrameRate, configuredRate); // 保障下限
+                _useFixedFrameRate = true; // 启用固定帧率驱动
+            }
+            _lastAnimationFrameIndex = -1; // 初始化帧序号
             Loaded += OverlayWindow_Loaded; // 窗口加载时初始化渲染
             Unloaded += OverlayWindow_Unloaded; // 窗口卸载时清理资源
+            var animationMode = _useFixedFrameRate ? $"{_targetAnimationFrameRate:F1}fps" : "CompositionTarget 实时节奏"; // 日志描述
+            AppLogger.Info($"OverlayWindow 初始化，动画驱动模式：{animationMode}。");
         }
-
         /// <summary>
         /// 在窗口句柄创建完成后追加透明与非激活样式，确保覆盖层不抢占焦点。
         /// </summary>
@@ -200,6 +218,7 @@ namespace WpfVideoPet
             _hasLoggedImageSource = false;
             _isAnimationPlaying = _animationUpdater != null;
             _animationStartTicks = Stopwatch.GetTimestamp();
+            _lastAnimationFrameIndex = -1;
             AppLogger.Info("渲染循环已启动。");
         }
 
@@ -329,6 +348,7 @@ namespace WpfVideoPet
             _animationUpdater.Reset();
             _animationStartTicks = Stopwatch.GetTimestamp();
             _isAnimationPlaying = true;
+            _lastAnimationFrameIndex = -1;
 
             _animationOffsetSeconds = _animationUpdater.StartTime;
             _animationDurationSeconds = Math.Max(0f, _animationUpdater.EndTime - _animationUpdater.StartTime);
@@ -382,7 +402,7 @@ namespace WpfVideoPet
         }
 
         /// <summary>
-        /// 按秒为单位驱动动画更新，维持骨骼或节点动画播放。
+        /// 按固定帧率或实际时间步进动画，确保渲染与模型播放节奏一致。
         /// </summary>
         private void UpdateAnimationFrame()
         {
@@ -395,7 +415,41 @@ namespace WpfVideoPet
             var elapsedSeconds = (double)elapsedTicks / Stopwatch.Frequency;
 
             float playbackSeconds;
-            if (_animationDurationSeconds > 1e-4f)
+            if (_useFixedFrameRate && _targetAnimationFrameRate > 1e-4f)
+            {
+                var frameDuration = 1.0 / _targetAnimationFrameRate; // 单帧耗时
+                var frameIndex = (int)Math.Floor(elapsedSeconds / frameDuration); // 当前帧序号
+                if (frameIndex == _lastAnimationFrameIndex)
+                {
+                    return;
+                }
+
+                _lastAnimationFrameIndex = frameIndex;
+
+                if (_animationDurationSeconds > 1e-4f)
+                {
+                    var totalFrameCount = Math.Max(1, (int)Math.Round(_animationDurationSeconds * _targetAnimationFrameRate)); // 循环内总帧数
+                    if (totalFrameCount > 0)
+                    {
+                        var wrappedIndex = frameIndex % totalFrameCount;
+                        if (wrappedIndex < 0)
+                        {
+                            wrappedIndex += totalFrameCount;
+                        }
+
+                        playbackSeconds = _animationOffsetSeconds + (float)(wrappedIndex / _targetAnimationFrameRate);
+                    }
+                    else
+                    {
+                        playbackSeconds = _animationOffsetSeconds;
+                    }
+                }
+                else
+                {
+                    playbackSeconds = _animationOffsetSeconds + (float)(frameIndex / _targetAnimationFrameRate);
+                }
+            }
+            else if (_animationDurationSeconds > 1e-4f)
             {
                 var cycle = (float)(elapsedSeconds % _animationDurationSeconds);
                 if (cycle < 0f)

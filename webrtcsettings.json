@@ -16,6 +16,9 @@
   "pageUrl": "https://60.208.82.254/", //信令服务器IP  重要
   "_comment_pageUrl": "承载 WebRTC 前端页面的地址，将在 WebView2 中加载。",
 
+  "overlayAnimationFrameRate": 30, //设置3D固定帧率
+  "_comment_overlayAnimationFrameRate": "覆盖层虚拟人动画的目标帧率（fps），0 表示按系统节奏渲染，可直接调整用于测试渲染流畅度。",
+
   "mqtt": {
     "_comment": "MQTT 对接配置，可根据后端平台的实际分配进行调整。",
     "enabled": true,

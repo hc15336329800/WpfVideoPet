@@ -13,6 +13,7 @@ namespace WpfVideoPet
         public string SignalServer { get; set; } = string.Empty;
         public string? OperatorToken { get; set; }
         public string PageUrl { get; set; } = "https://localhost";
+        public float OverlayAnimationFrameRate { get; set; } = 30f; // 叠加层动画目标帧率（0 表示按系统节奏）
 
         public MqttConfig Mqtt { get; } = new();
         public AudioDuckingConfig AudioDucking { get; } = new();
@@ -79,6 +80,11 @@ namespace WpfVideoPet
                         {
                             config.PageUrl = value.Trim();
                         }
+                    }
+                    if (root.TryGetProperty("overlayAnimationFrameRate", out var frameRateElement) && frameRateElement.TryGetDouble(out var frameRateValue))
+                    {
+                        var clamped = Math.Clamp((float)frameRateValue, 0f, 120f);
+                        config.OverlayAnimationFrameRate = clamped;
                     }
 
                     if (root.TryGetProperty("mqtt", out var mqttElement) && mqttElement.ValueKind == JsonValueKind.Object)
