@@ -764,25 +764,25 @@ namespace WpfVideoPet
         }
 
         /// <summary>
-        /// 创建方向光节点模拟主光源。
+        /// 创建方向光节点模拟主光源。 【主光】
         /// </summary>
         private static DirectionalLightNode CreateDirectionalLight()
         {
             return new DirectionalLightNode
             {
-                Color = new SDX.Color4(1.2f, 1.2f, 1.2f, 1f),
+                Color = new SDX.Color4(1.2f, 1.2f, 1.2f, 1f), //红色 (R)、绿色 (G)、蓝色 (B) 的强度，以及 透明度/不透明度
                 Direction = SDX.Vector3.Normalize(new SDX.Vector3(-1f, -1f, -1f))
             };
         }
 
         /// <summary>
-        /// 创建辅助方向光以提升面部和背光区域亮度。
+        /// 创建辅助方向光以提升面部和背光区域亮度。 【补光】
         /// </summary>
         private static DirectionalLightNode CreateFillLight()
         {
             return new DirectionalLightNode
             {
-                Color = new SDX.Color4(0.6f, 0.6f, 0.7f, 1f),
+                Color = new SDX.Color4(0.2f, 0.2f, 0.2f, 1f), //红色 (R)、绿色 (G)、蓝色 (B) 的强度，以及 透明度/不透明度
                 Direction = SDX.Vector3.Normalize(new SDX.Vector3(0.5f, -0.3f, 0.2f))
             };
         }
