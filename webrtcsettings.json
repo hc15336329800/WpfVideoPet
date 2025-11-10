@@ -51,13 +51,13 @@
     "controlSubscribeTopic": "lanmao001/plc/sub", //向指定的主题（Topic）读取一条消息。
     "statusArea": {
       "_comment": "轮询读取的 DB 区域。",
-      "dbNumber": 100,
+      "dbNumber": 200,
       "startByte": 0,
       "byteLength": 3
     },
     "controlArea": {
       "_comment": "允许写入的 DB 区域。",
-      "dbNumber": 200,
+      "dbNumber": 100,
       "startByte": 0,
       "byteLength": 3
     }
