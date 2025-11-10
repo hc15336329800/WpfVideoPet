@@ -1,6 +1,10 @@
-﻿using S7.Net;
+﻿﻿using S7.Net;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using WpfVideoPet.mqtt;
@@ -17,9 +21,15 @@ namespace WpfVideoPet.service
         private readonly MqttCoreService _mqttBridge; // MQTT 桥接实例
         private readonly SemaphoreSlim _plcLock = new(1, 1); // PLC 访问锁
         private readonly EventHandler<MqttBridgeMessage> _controlHandler; // 控制消息处理器
+        private readonly JsonSerializerOptions _jsonOptions = new() // JSON 序列化配置
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
         private Plc? _plc; // PLC 客户端实例
         private bool _disposed; // 释放标记
         private bool _controlSubscribed; // 控制订阅状态
+        private CancellationTokenSource? _pollingCts; // 状态轮询取消源
+        private Task? _statusPollingTask; // 状态轮询后台任务
 
         /// <summary>
         /// 使用应用配置和共享 MQTT 桥接实例初始化服务。
@@ -76,6 +86,8 @@ namespace WpfVideoPet.service
             }
 
             await EnsurePlcConnectedAsync(cancellationToken).ConfigureAwait(false);
+
+            StartStatusPollingLoop(cancellationToken);
         }
 
         /// <summary>
@@ -93,7 +105,7 @@ namespace WpfVideoPet.service
                 _mqttBridge.MessageReceived -= _controlHandler;
                 _controlSubscribed = false;
             }
-
+            await StopStatusPollingLoopAsync().ConfigureAwait(false);
             await ClosePlcAsync().ConfigureAwait(false);
             AppLogger.Info("Siemens S7 服务已停止并关闭 PLC 连接。");
         }
@@ -203,6 +215,73 @@ namespace WpfVideoPet.service
                 _plcLock.Release();
             }
         }
+        /// <summary>
+        /// 批量写入控制区的布尔位数据，按照位顺序组包并一次性写入 PLC。
+        /// </summary>
+        /// <param name="bitValues">按照位顺序排列的布尔数组。</param>
+        /// <param name="cancellationToken">可选的取消令牌。</param>
+        public async Task WriteControlBitsAsync(bool[] bitValues, CancellationToken cancellationToken = default)
+        {
+            if (bitValues == null)
+            {
+                throw new ArgumentNullException(nameof(bitValues));
+            }
+
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(SiemensS7Service));
+            }
+
+            if (!_config.Enabled)
+            {
+                return;
+            }
+
+            var area = _config.ControlArea; // 控制区配置
+            if (area.ByteLength <= 0)
+            {
+                AppLogger.Warn("控制区字节长度未配置，批量写入已跳过。");
+                return;
+            }
+
+            var maxBits = area.ByteLength * 8; // 控制区最大位数
+            if (bitValues.Length > maxBits)
+            {
+                throw new ArgumentOutOfRangeException(nameof(bitValues), $"位数组长度超出控制区范围: {bitValues.Length}/{maxBits}");
+            }
+
+            await EnsurePlcConnectedAsync(cancellationToken).ConfigureAwait(false);
+
+            await _plcLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (_plc == null)
+                {
+                    return;
+                }
+
+                var buffer = new byte[area.ByteLength]; // 控制区写入缓冲
+                for (var i = 0; i < bitValues.Length; i++)
+                {
+                    if (!bitValues[i])
+                    {
+                        continue;
+                    }
+
+                    var byteOffset = i / 8; // 目标字节偏移
+                    var bitOffset = i % 8; // 位偏移
+                    buffer[byteOffset] |= (byte)(1 << bitOffset);
+                }
+
+                await Task.Run(() => _plc.WriteBytes(DataType.DataBlock, area.DbNumber, area.StartByte, buffer), cancellationToken)
+                    .ConfigureAwait(false);
+                AppLogger.Info($"已批量写入 PLC 控制位，写入位数: {bitValues.Length}。");
+            }
+            finally
+            {
+                _plcLock.Release();
+            }
+        }
 
         /// <summary>
         /// 释放所占资源，并在必要时记录释放过程中的异常信息。
@@ -292,6 +371,11 @@ namespace WpfVideoPet.service
         /// </summary>
         /// <param name="sender">事件源。</param>
         /// <param name="message">定长消息内容。</param>
+        /// <summary>
+        /// 处理来自 MQTT 控制主题的指令。
+        /// </summary>
+        /// <param name="sender">事件源。</param>
+        /// <param name="message">定长消息内容。</param>
         private void OnControlMessageReceived(object? sender, MqttBridgeMessage message)
         {
             if (_disposed)
@@ -306,29 +390,60 @@ namespace WpfVideoPet.service
                 return;
             }
 
-            var payload = message.Payload.Span;
-            if (payload.Length < 2)
+            var bitString = Encoding.UTF8.GetString(message.Payload.Span).Trim();
+            if (string.IsNullOrWhiteSpace(bitString))
             {
-                AppLogger.Warn("PLC 控制消息长度不足 2 字节，已忽略。");
+                AppLogger.Warn("PLC 控制消息为空，已忽略。");
                 return;
             }
 
-            var bitIndex = payload[0]; // 目标位索引
-            var bitValue = payload[1] != 0; // 写入值
-            AppLogger.Info($"收到 PLC 控制指令，位索引: {bitIndex}, 值: {(bitValue ? 1 : 0)}");
+            var sanitizedBits = new List<bool>(); // 解析后的位序列
+            foreach (var ch in bitString)
+            {
+                if (ch == '0')
+                {
+                    sanitizedBits.Add(false);
+                }
+                else if (ch == '1')
+                {
+                    sanitizedBits.Add(true);
+                }
+                else if (!char.IsWhiteSpace(ch))
+                {
+                    AppLogger.Warn($"检测到非法的 PLC 控制位字符: {ch}");
+                    return;
+                }
+            }
+
+            if (sanitizedBits.Count == 0)
+            {
+                AppLogger.Warn("PLC 控制消息未包含有效位信息，已忽略。");
+                return;
+            }
+
+            var maxBits = _config.ControlArea.ByteLength * 8; // 控制区位容量
+            if (sanitizedBits.Count > maxBits)
+            {
+                AppLogger.Warn($"控制位数量超出配置容量，将截断至 {maxBits} 位。");
+                sanitizedBits = sanitizedBits.Take(maxBits).ToList();
+            }
+
+            var bitArray = sanitizedBits.ToArray(); // 转换为数组供写入
+            AppLogger.Info($"收到 PLC 控制批量写入请求，位数: {bitArray.Length}");
 
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    await WriteControlBitAsync(bitIndex, bitValue, CancellationToken.None).ConfigureAwait(false);
+                    await WriteControlBitsAsync(bitArray, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"处理 PLC 控制消息失败: {ex.Message}");
+                    AppLogger.Error(ex, "批量写入 PLC 控制位失败。");
                 }
             });
         }
+
 
         /// <summary>
         /// 将配置中的 CPU 字符串解析为枚举。
@@ -342,6 +457,145 @@ namespace WpfVideoPet.service
             }
 
             return CpuType.S71200;
+        }
+
+        /// <summary>
+        /// 启动后台轮询线程，从 PLC 读取状态并发布到指定主题。
+        /// </summary>
+        /// <param name="startupToken">外部启动时传入的取消标记。</param>
+        private void StartStatusPollingLoop(CancellationToken startupToken)
+        {
+            if (_statusPollingTask != null && !_statusPollingTask.IsCompleted)
+            {
+                return;
+            }
+
+            if (_config.StatusArea == null || _config.StatusArea.ByteLength <= 0)
+            {
+                AppLogger.Warn("未配置 PLC 状态区域，后台轮询任务未启动。");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_config.StatusPublishTopic))
+            {
+                AppLogger.Warn("未配置 PLC 状态上报主题，后台轮询任务未启动。");
+                return;
+            }
+
+            var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(startupToken);
+            _pollingCts = linkedCts;
+            _statusPollingTask = Task.Run(() => RunStatusPollingLoopAsync(linkedCts.Token), CancellationToken.None);
+            AppLogger.Info("PLC 状态轮询任务已启动。");
+        }
+
+        /// <summary>
+        /// 停止后台状态轮询任务，确保资源正确释放。
+        /// </summary>
+        private async Task StopStatusPollingLoopAsync()
+        {
+            if (_statusPollingTask == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _pollingCts?.Cancel();
+                await _statusPollingTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // ignore cancellation
+            }
+            finally
+            {
+                _pollingCts?.Dispose();
+                _pollingCts = null;
+                _statusPollingTask = null;
+                AppLogger.Info("PLC 状态轮询任务已停止。");
+            }
+        }
+
+        /// <summary>
+        /// 按照固定周期轮询 PLC 状态并通过 MQTT 发布 JSON 报文。
+        /// </summary>
+        /// <param name="cancellationToken">用于终止任务的取消标记。</param>
+        private async Task RunStatusPollingLoopAsync(CancellationToken cancellationToken)
+        {
+            var interval = Math.Max(100, _config.PollingIntervalMilliseconds); // 轮询间隔
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    var statusBytes = await ReadStatusAreaAsync(cancellationToken).ConfigureAwait(false);
+                    var payload = BuildStatusPayload(statusBytes); // JSON 报文
+
+                    if (payload != null)
+                    {
+                        await _mqttBridge.SendStringAsync(payload, Encoding.UTF8, _config.StatusPublishTopic, false, cancellationToken)
+                            .ConfigureAwait(false);
+                        AppLogger.Info($"已发布 PLC 状态，字节数: {statusBytes.Length}");
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, "PLC 状态轮询过程中发生异常。");
+                }
+
+                try
+                {
+                    await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 将 PLC 状态字节转换为 JSON 文本，包含时间戳、错误码与数据字段。
+        /// </summary>
+        /// <param name="statusBytes">PLC 返回的状态字节。</param>
+        /// <returns>可发布的 JSON 字符串。</returns>
+        private string? BuildStatusPayload(byte[] statusBytes)
+        {
+            if (statusBytes == null || statusBytes.Length == 0)
+            {
+                AppLogger.Warn("PLC 状态轮询返回空数据。");
+                return null;
+            }
+
+            var bitString = ConvertToBitString(statusBytes); // 状态位字符串
+            var envelope = new
+            {
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                errorCode = 0,
+                data = bitString
+            };
+
+            return JsonSerializer.Serialize(envelope, _jsonOptions);
+        }
+
+        /// <summary>
+        /// 将字节数组转换为 01 字符串，便于前后端传输与解析。
+        /// </summary>
+        /// <param name="bytes">待转换的字节数组。</param>
+        /// <returns>由 0 和 1 组成的位字符串。</returns>
+        private static string ConvertToBitString(byte[] bytes)
+        {
+            var builder = new StringBuilder(bytes.Length * 8); // 字符串构造器
+            foreach (var b in bytes)
+            {
+                builder.Append(Convert.ToString(b, 2).PadLeft(8, '0'));
+            }
+
+            return builder.ToString();
         }
     }
 }
