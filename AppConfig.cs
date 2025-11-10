@@ -10,7 +10,7 @@ namespace WpfVideoPet
     {
         public string Role { get; set; } = "client";
         public string Room { get; set; } = "default";
-        public string SignalServer { get; set; } = string.Empty;
+        public string SignalServer { get; set; } = string.Empty; 
         public string? OperatorToken { get; set; }
         public string PageUrl { get; set; } = "https://localhost";
         public float OverlayAnimationFrameRate { get; set; } = 30f; // 叠加层动画目标帧率（0 表示按系统节奏）
