@@ -14,6 +14,7 @@ namespace WpfVideoPet
         public string? OperatorToken { get; set; }
         public string PageUrl { get; set; } = "https://localhost";
         public float OverlayAnimationFrameRate { get; set; } = 30f; // 叠加层动画目标帧率（0 表示按系统节奏）
+        public OverlayRenderConfig OverlayRender { get; } = new(); // 叠加层渲染配置
 
         public MqttConfig Mqtt { get; } = new();
         public AudioDuckingConfig AudioDucking { get; } = new();
@@ -86,7 +87,10 @@ namespace WpfVideoPet
                         var clamped = Math.Clamp((float)frameRateValue, 0f, 120f);
                         config.OverlayAnimationFrameRate = clamped;
                     }
-
+                    if (root.TryGetProperty("overlayRender", out var overlayRenderElement))
+                    {
+                        ApplyOverlayRenderConfig(overlayRenderElement, config.OverlayRender);
+                    }
                     if (root.TryGetProperty("mqtt", out var mqttElement) && mqttElement.ValueKind == JsonValueKind.Object)
                     {
                         var mqtt = config.Mqtt;
@@ -330,7 +334,69 @@ namespace WpfVideoPet
             error = null;
             return true;
         }
+        /// <summary>
+        /// 从 JSON 元素解析叠加层渲染配置，兼容对象与“宽x高”字符串两种写法。
+        /// </summary>
+        private static void ApplyOverlayRenderConfig(JsonElement element, OverlayRenderConfig target)
+        {
+            if (target == null)
+            {
+                return;
+            }
 
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                if (element.TryGetProperty("width", out var widthElement) && widthElement.TryGetInt32(out var widthValue))
+                {
+                    target.Width = Math.Max(1, widthValue);
+                }
+
+                if (element.TryGetProperty("height", out var heightElement) && heightElement.TryGetInt32(out var heightValue))
+                {
+                    target.Height = Math.Max(1, heightValue);
+                }
+            }
+            else if (element.ValueKind == JsonValueKind.String)
+            {
+                var raw = element.GetString();
+                if (TryParseResolution(raw, out var width, out var height))
+                {
+                    target.Width = width;
+                    target.Height = height;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 尝试解析“宽x高”格式的分辨率文本，返回提取到的宽度与高度数值。
+        /// </summary>
+        private static bool TryParseResolution(string? value, out int width, out int height)
+        {
+            width = 0;
+            height = 0;
+
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            var separators = new[] { 'x', 'X', '*', '×' };
+            var parts = value.Split(separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            if (!int.TryParse(parts[0], out var widthValue) || !int.TryParse(parts[1], out var heightValue))
+            {
+                return false;
+            }
+
+            width = Math.Max(1, widthValue);
+            height = Math.Max(1, heightValue);
+            return true;
+        }
         private static string RemoveJsonComments(string json)
         {
             if (string.IsNullOrEmpty(json))
@@ -438,6 +504,14 @@ namespace WpfVideoPet
             return (backslashCount & 1) == 1;
         }
     }
+}
+/// <summary>
+/// 定义叠加层的渲染输出尺寸，允许通过配置文件调整宽高。
+/// </summary>
+public sealed class OverlayRenderConfig
+{
+    public int Width { get; set; } = 1080; // 渲染目标宽度
+    public int Height { get; set; } = 1920; // 渲染目标高度
 }
 
 public sealed class MqttConfig

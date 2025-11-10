@@ -63,6 +63,10 @@ namespace WpfVideoPet
         private bool _isRendering; // 渲染循环标记
         private bool _hasLoggedImageSource; // 是否记录过图像源绑定
         private int _frameCounter; // 渲染帧计数
+        private readonly int _renderTargetWidth; // 3D 渲染目标宽度
+        private readonly int _renderTargetHeight; // 3D 渲染目标高度
+        private readonly bool _useFixedRenderResolution; // 是否使用固定渲染分辨率
+        private bool _hasSyncedFixedResolution; // 固定分辨率同步标记
 
         /// <summary>
         /// 初始化覆盖层窗口，订阅生命周期事件并准备 Core 渲染环境。
@@ -70,6 +74,7 @@ namespace WpfVideoPet
         public OverlayWindow(AppConfig? config = null)
         {
             InitializeComponent();
+            RenderOptions.SetBitmapScalingMode(PetImage, BitmapScalingMode.HighQuality);
             var configuredRate = config?.OverlayAnimationFrameRate ?? DefaultAnimationFrameRate; // 读取配置中的帧率
             if (configuredRate <= 0f)
             {
@@ -81,11 +86,24 @@ namespace WpfVideoPet
                 _targetAnimationFrameRate = Math.Max(MinimumAnimationFrameRate, configuredRate); // 保障下限
                 _useFixedFrameRate = true; // 启用固定帧率驱动
             }
+            if (config?.OverlayRender is { Width: > 0, Height: > 0 })
+            {
+                _renderTargetWidth = config.OverlayRender.Width;
+                _renderTargetHeight = config.OverlayRender.Height;
+                _useFixedRenderResolution = true;
+            }
+            else
+            {
+                _renderTargetWidth = 0;
+                _renderTargetHeight = 0;
+                _useFixedRenderResolution = false;
+            }
             _lastAnimationFrameIndex = -1; // 初始化帧序号
             _animationFrameCount = 0; // 初始化关键帧数量
             _animationFrameDuration = 0d; // 初始化关键帧时长
             _animationSourceFrameRate = 0d; // 初始化原始帧率
             Loaded += OverlayWindow_Loaded; // 窗口加载时初始化渲染
+
             Unloaded += OverlayWindow_Unloaded; // 窗口卸载时清理资源
             var animationMode = _useFixedFrameRate ? $"{_targetAnimationFrameRate:F1}fps" : "CompositionTarget 实时节奏"; // 日志描述
             AppLogger.Info($"OverlayWindow 初始化，动画驱动模式：{animationMode}。");
@@ -213,10 +231,10 @@ namespace WpfVideoPet
 
             PetImage.SizeChanged += OnPetImageSizeChanged;
 
-            var width = Math.Max(1, (int)Math.Ceiling(PetImage.ActualWidth));
-            var height = Math.Max(1, (int)Math.Ceiling(PetImage.ActualHeight));
+            var width = _useFixedRenderResolution ? Math.Max(1, _renderTargetWidth) : Math.Max(1, (int)Math.Ceiling(PetImage.ActualWidth));
+            var height = _useFixedRenderResolution ? Math.Max(1, _renderTargetHeight) : Math.Max(1, (int)Math.Ceiling(PetImage.ActualHeight));
             _renderHost.StartD3D(width, height);
-            AppLogger.Info($"StartD3D: {width}x{height}");
+            AppLogger.Info($"StartD3D: {width}x{height} (fixed={_useFixedRenderResolution})");
             _renderHost.UpdateAndRender();
 
             CompositionTarget.Rendering += OnCompositionRendering;
@@ -274,6 +292,7 @@ namespace WpfVideoPet
             _animationFrameCount = 0; // 重置关键帧数量
             _animationFrameDuration = 0d; // 重置关键帧时长
             _animationSourceFrameRate = 0d; // 重置原始帧率
+            _hasSyncedFixedResolution = false; // 重置固定分辨率标记
             AppLogger.Info("3D 渲染资源清理完成。");
         }
 
@@ -322,10 +341,23 @@ namespace WpfVideoPet
                 return;
             }
 
-            var width = Math.Max(1, (int)Math.Ceiling(e.NewSize.Width));
-            var height = Math.Max(1, (int)Math.Ceiling(e.NewSize.Height));
-            _renderHost.Resize(width, height);
-            AppLogger.Info($"PetImage 尺寸变化：{width}x{height}");
+            if (_useFixedRenderResolution)
+            {
+                var width = Math.Max(1, _renderTargetWidth); // 固定宽度
+                var height = Math.Max(1, _renderTargetHeight); // 固定高度
+                _renderHost.Resize(width, height);
+                if (!_hasSyncedFixedResolution)
+                {
+                    _hasSyncedFixedResolution = true;
+                    AppLogger.Info($"PetImage 固定渲染分辨率：{width}x{height}");
+                }
+                return;
+            }
+
+            var dynamicWidth = Math.Max(1, (int)Math.Ceiling(e.NewSize.Width));
+            var dynamicHeight = Math.Max(1, (int)Math.Ceiling(e.NewSize.Height));
+            _renderHost.Resize(dynamicWidth, dynamicHeight);
+            AppLogger.Info($"PetImage 尺寸变化：{dynamicWidth}x{dynamicHeight}");
         }
 
         /// <summary>

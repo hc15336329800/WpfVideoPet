@@ -38,6 +38,7 @@
                        Stretch="Uniform"
                        Focusable="False"
                        IsHitTestVisible="False"
+                       RenderOptions.BitmapScalingMode="HighQuality"
                        SnapsToDevicePixels="True"/>
             </Grid>
         </Border>
