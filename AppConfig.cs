@@ -632,12 +632,12 @@ public sealed class PlcConfig
     /// <summary>
     /// PLC 轮询结果发布的 MQTT 主题。
     /// </summary>
-    public string StatusPublishTopic { get; set; } = "plc/status/777";
+    public string StatusPublishTopic { get; set; }
 
     /// <summary>
     /// PLC 控制指令订阅的 MQTT 主题。
     /// </summary>
-    public string ControlSubscribeTopic { get; set; } = "plc/control/888";
+    public string ControlSubscribeTopic { get; set; }
 
     /// <summary>
     /// 轮询读取的 DB 区域信息。
