@@ -30,7 +30,7 @@ namespace WpfVideoPet
         private const int WsExTransparent = 0x20; // 允许鼠标穿透样式值
         private const int WsExNoActivate = 0x8000000; // 禁止窗口激活样式值
         private const string ModelFileName = "117.glb"; // 默认模型文件名avatar2.fbx
-                                                        //private const string ModelFileName = "117.fbx";
+        private const float ModelScaleFactor = 1.3f; // 模型放大比例   模型放大比例
         private const int RenderHeartbeat = 300; // 渲染心跳间隔帧
         private const float DefaultAnimationFrameRate = 30f; // 默认动画帧率
         private const float MinimumAnimationFrameRate = 1f; // 允许配置的最低动画
@@ -168,7 +168,10 @@ namespace WpfVideoPet
             if (_loadedScene?.Root != null)
             {
                 _sceneRoot.AddChildNode(_loadedScene.Root);
-                AppLogger.Info($"模型加载成功：{modelPath}");
+
+                var scaleMatrix = SDX.Matrix.Scaling(ModelScaleFactor); // 模型缩放矩阵
+                _loadedScene.Root.ModelMatrix = scaleMatrix * _loadedScene.Root.ModelMatrix; // 应用统一缩放
+                AppLogger.Info($"模型加载成功：{modelPath}，缩放系数：{ModelScaleFactor:P0}");
 
                 InitializeAnimationPlayer();
                 _loadedScene?.Root?.UpdateAllTransformMatrix(); //  确保 BoundsWithTransform 是最新的

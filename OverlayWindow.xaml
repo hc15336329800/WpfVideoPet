@@ -33,7 +33,7 @@
                 VerticalAlignment="Bottom"
                Margin="-56,16,16,-66"
                 Background="#00000000">
-            <Grid Width="500" Height="600">
+            <Grid Width="600" Height="700">
                 <Image x:Name="PetImage"
                        Stretch="Uniform"
                        Focusable="False"
