@@ -31,9 +31,9 @@
         <!-- 🟥 右下角 3D 模型区域（Core DX11 渲染输出） -->
         <Border HorizontalAlignment="Right"
                 VerticalAlignment="Bottom"
-                Margin="16"
+               Margin="-56,16,16,-66"
                 Background="#00000000">
-            <Grid Width="300" Height="300">
+            <Grid Width="500" Height="600">
                 <Image x:Name="PetImage"
                        Stretch="Uniform"
                        Focusable="False"
