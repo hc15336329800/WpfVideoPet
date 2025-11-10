@@ -47,8 +47,8 @@
     "rack": 0,
     "slot": 1,
     "pollingIntervalMilliseconds": 3000,
-    "statusPublishTopic": "plc/status/777",
-    "controlSubscribeTopic": "plc/control/888",
+    "statusPublishTopic": "lanmao001/plc/pub", //向指定的主题（Topic）推送一条消息。
+    "controlSubscribeTopic": "lanmao001/plc/sub", //向指定的主题（Topic）读取一条消息。
     "statusArea": {
       "_comment": "轮询读取的 DB 区域。",
       "dbNumber": 100,
