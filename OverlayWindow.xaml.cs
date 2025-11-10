@@ -6,6 +6,7 @@ using HelixToolkit.SharpDX.Core.Cameras; // 相机核心类型
 using HelixToolkit.SharpDX.Core.Model; // 材质定义
 using HelixToolkit.SharpDX.Core.Model.Scene; // 场景节点
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -53,7 +54,10 @@ namespace WpfVideoPet
         private readonly float _targetAnimationFrameRate; // 动画目标帧率
         private readonly bool _useFixedFrameRate; // 是否启用固定帧率节拍
         private int _lastAnimationFrameIndex; // 上一次应用的帧序号
-        private RenderHostDX? _renderHost; // DX11 渲染宿主
+        private int _animationFrameCount; // 动画关键帧数量
+        private double _animationFrameDuration; // 原始关键帧间隔秒
+        private double _animationSourceFrameRate; // 原始动画帧率
+                                    private RenderHostDX? _renderHost; // DX11 渲染宿主
         private ViewportCore? _viewportCore; // ViewportCore 管理器
         private ImageSourceDX? _imageSource; // 输出图像源
         private bool _isRendering; // 渲染循环标记
@@ -78,6 +82,9 @@ namespace WpfVideoPet
                 _useFixedFrameRate = true; // 启用固定帧率驱动
             }
             _lastAnimationFrameIndex = -1; // 初始化帧序号
+            _animationFrameCount = 0; // 初始化关键帧数量
+            _animationFrameDuration = 0d; // 初始化关键帧时长
+            _animationSourceFrameRate = 0d; // 初始化原始帧率
             Loaded += OverlayWindow_Loaded; // 窗口加载时初始化渲染
             Unloaded += OverlayWindow_Unloaded; // 窗口卸载时清理资源
             var animationMode = _useFixedFrameRate ? $"{_targetAnimationFrameRate:F1}fps" : "CompositionTarget 实时节奏"; // 日志描述
@@ -264,8 +271,12 @@ namespace WpfVideoPet
             _animationStartTicks = 0;
             _animationOffsetSeconds = 0f;
             _animationDurationSeconds = 0f;
+            _animationFrameCount = 0; // 重置关键帧数量
+            _animationFrameDuration = 0d; // 重置关键帧时长
+            _animationSourceFrameRate = 0d; // 重置原始帧率
             AppLogger.Info("3D 渲染资源清理完成。");
         }
+
 
         /// <summary>
         /// 每帧渲染回调：驱动动画更新并请求 DX11 渲染输出。
@@ -358,6 +369,7 @@ namespace WpfVideoPet
                 var minTime = float.PositiveInfinity; // 最早关键帧
                 var maxTime = float.NegativeInfinity; // 最晚关键帧
                 var keyframeCount = 0; // 关键帧数量
+                var uniqueTimes = new SortedSet<float>(); // 唯一关键帧时间集合
 
                 foreach (var node in nodeUpdater.NodeCollection)
                 {
@@ -374,6 +386,7 @@ namespace WpfVideoPet
                         }
 
                         keyframeCount++;
+                        uniqueTimes.Add(frame.Time);
                     }
                 }
 
@@ -395,7 +408,47 @@ namespace WpfVideoPet
                 }
 
                 var playbackMax = _animationOffsetSeconds + _animationDurationSeconds;
-                AppLogger.Info($"动画关键帧统计：Count={keyframeCount} Min={_animationOffsetSeconds:F3}s Max={playbackMax:F3}s");
+
+                _animationFrameCount = Math.Max(1, uniqueTimes.Count); // 记录唯一关键帧数量
+                if (_animationFrameCount <= 1 && _animationDurationSeconds > 1e-4f)
+                {
+                    _animationFrameCount = Math.Max(2, (int)Math.Round(_animationDurationSeconds * _targetAnimationFrameRate));
+                }
+
+                _animationFrameDuration = 0d;
+                if (_animationFrameCount > 1 && _animationDurationSeconds > 1e-4f)
+                {
+                    _animationFrameDuration = _animationDurationSeconds / (_animationFrameCount - 1);
+                }
+
+                if (_animationFrameDuration <= 1e-6d)
+                {
+                    double lastTime = double.NaN;
+                    foreach (var time in uniqueTimes)
+                    {
+                        if (!double.IsNaN(lastTime))
+                        {
+                            var gap = time - lastTime;
+                            if (gap > 1e-6d && (_animationFrameDuration <= 1e-6d || gap < _animationFrameDuration))
+                            {
+                                _animationFrameDuration = gap;
+                            }
+                        }
+
+                        lastTime = time;
+                    }
+                }
+
+                if (_animationFrameDuration <= 1e-6d)
+                {
+                    _animationFrameDuration = _targetAnimationFrameRate > 1e-4f ? 1.0 / _targetAnimationFrameRate : 1.0 / DefaultAnimationFrameRate;
+                }
+
+                _animationSourceFrameRate = _animationFrameDuration > 1e-6d ? 1.0 / _animationFrameDuration : 0d; // 估算原始帧率
+                var estimatedCycleSeconds = _animationFrameCount > 1 ? _animationFrameDuration * (_animationFrameCount - 1) : 0d; // 源动画单周期时长
+                var targetCycleSeconds = _targetAnimationFrameRate > 1e-4f && _animationFrameCount > 0 ? _animationFrameCount / _targetAnimationFrameRate : 0d; // 目标帧率下单周期时长
+
+                AppLogger.Info($"动画关键帧统计：Count={keyframeCount} Unique={_animationFrameCount} Min={_animationOffsetSeconds:F3}s Max={playbackMax:F3}s SrcFPS={_animationSourceFrameRate:F2} Cycle@Src={estimatedCycleSeconds:F3}s Cycle@Target={targetCycleSeconds:F3}s");
             }
 
             AppLogger.Info($"动画初始化成功：Name={_animationUpdater.Name} Offset={_animationOffsetSeconds:F3}s Duration={_animationDurationSeconds:F3}s");
@@ -426,7 +479,33 @@ namespace WpfVideoPet
 
                 _lastAnimationFrameIndex = frameIndex;
 
-                if (_animationDurationSeconds > 1e-4f)
+                if (_animationFrameDuration > 1e-6d && _animationFrameCount > 0)
+                {
+                    var totalFrameCount = Math.Max(1, _animationFrameCount);
+                    var wrappedIndex = frameIndex % totalFrameCount;
+                    if (wrappedIndex < 0)
+                    {
+                        wrappedIndex += totalFrameCount;
+                    }
+
+                    var candidateSeconds = _animationOffsetSeconds + (float)(wrappedIndex * _animationFrameDuration);
+                    if (_animationDurationSeconds > 1e-4f)
+                    {
+                        var minSeconds = _animationOffsetSeconds;
+                        var maxSeconds = _animationOffsetSeconds + _animationDurationSeconds;
+                        if (candidateSeconds < minSeconds)
+                        {
+                            candidateSeconds = minSeconds;
+                        }
+                        else if (candidateSeconds > maxSeconds)
+                        {
+                            candidateSeconds = maxSeconds;
+                        }
+                    }
+
+                    playbackSeconds = candidateSeconds;
+                }
+                else if (_animationDurationSeconds > 1e-4f)
                 {
                     var totalFrameCount = Math.Max(1, (int)Math.Round(_animationDurationSeconds * _targetAnimationFrameRate)); // 循环内总帧数
                     if (totalFrameCount > 0)
