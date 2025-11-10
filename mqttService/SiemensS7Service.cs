@@ -557,9 +557,15 @@ namespace WpfVideoPet.service
                 }
             }
         }
+        private const int StatusDataBitLength = 16; // PLC 状态位固定长度
 
         /// <summary>
         /// 将 PLC 状态字节转换为 JSON 文本，包含时间戳、错误码与数据字段。
+        /// </summary>
+        /// <param name="statusBytes">PLC 返回的状态字节。</param>
+        /// <returns>可发布的 JSON 字符串。</returns>
+        /// <summary>
+        /// 将 PLC 状态字节转换为 JSON 文本，包含错误码与二进制数据字段。
         /// </summary>
         /// <param name="statusBytes">PLC 返回的状态字节。</param>
         /// <returns>可发布的 JSON 字符串。</returns>
@@ -572,15 +578,16 @@ namespace WpfVideoPet.service
             }
 
             var bitString = ConvertToBitString(statusBytes); // 状态位字符串
+            var normalizedData = NormalizeBitString(bitString, StatusDataBitLength); // 裁剪后的状态位
             var envelope = new
             {
-                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                errorCode = 0,
-                data = bitString
+                err = 0,
+                data = normalizedData
             };
 
             return JsonSerializer.Serialize(envelope, _jsonOptions);
         }
+
 
         /// <summary>
         /// 将字节数组转换为 01 字符串，便于前后端传输与解析。
@@ -597,5 +604,31 @@ namespace WpfVideoPet.service
 
             return builder.ToString();
         }
+
+
+        /// <summary>
+        /// 根据指定长度裁剪或填充状态位字符串，确保下行数据满足业务期望。
+        /// </summary>
+        /// <param name="bitString">原始的状态位字符串。</param>
+        /// <param name="requiredLength">期望输出的位数。</param>
+        /// <returns>满足长度要求的状态位字符串。</returns>
+        private static string NormalizeBitString(string bitString, int requiredLength)
+        {
+            var safeLength = Math.Max(0, requiredLength); // 期望长度
+
+            if (string.IsNullOrEmpty(bitString))
+            {
+                return new string('0', safeLength);
+            }
+
+            if (bitString.Length >= safeLength)
+            {
+                return bitString.Substring(0, safeLength);
+            }
+
+            var paddingLength = safeLength - bitString.Length; // 需要填充的位数
+            return bitString + new string('0', paddingLength);
+        }
+
     }
 }
