@@ -173,6 +173,8 @@ namespace WpfVideoPet
                 _loadedScene.Root.ModelMatrix = scaleMatrix * _loadedScene.Root.ModelMatrix; // 应用统一缩放
                 AppLogger.Info($"模型加载成功：{modelPath}，缩放系数：{ModelScaleFactor:P0}");
 
+                ApplyPreferredRenderTechniques(_loadedScene); // 统一材质渲染技术
+
                 InitializeAnimationPlayer();
                 _loadedScene?.Root?.UpdateAllTransformMatrix(); //  确保 BoundsWithTransform 是最新的
 
@@ -196,6 +198,7 @@ namespace WpfVideoPet
 
             _sceneRoot.AddChildNode(CreateAmbientLight());
             _sceneRoot.AddChildNode(CreateDirectionalLight());
+            _sceneRoot.AddChildNode(CreateFillLight());
 
             var transparentColor = new SDX.Color4(0f, 0f, 0f, 0f); // 透明色
 
@@ -577,9 +580,92 @@ namespace WpfVideoPet
             {
                 playbackSeconds = _animationOffsetSeconds + (float)elapsedSeconds;
             }
-
             _animationUpdater.Update(playbackSeconds, 1);
             _loadedScene?.Root?.UpdateAllTransformMatrix();
+        }
+
+        /// <summary>
+        /// 遍历已加载场景的所有网格节点，将 PBR 材质转换为 Blinn/Phong 技术并输出详细统计日志，保障缺失环境贴图时的亮度。
+        /// </summary>
+        private void ApplyPreferredRenderTechniques(HelixToolkitScene scene)
+        {
+            if (scene?.Root == null)
+            {
+                AppLogger.Warn("场景为空，无法调整渲染技术。");
+                return;
+            }
+
+            var nodeStack = new Stack<SceneNode>(); // 深度遍历栈
+            var totalMeshCount = 0; // 网格节点计数
+            var convertedMeshCount = 0; // 成功转换的网格计数
+            var retainedMeshCount = 0; // 维持原材质的网格计数
+
+            nodeStack.Push(scene.Root);
+
+            while (nodeStack.Count > 0)
+            {
+                var currentNode = nodeStack.Pop(); // 当前节点
+
+                if (currentNode.Items != null)
+                {
+                    for (var i = 0; i < currentNode.Items.Count; i++)
+                    {
+                        var childNode = currentNode.Items[i]; // 子节点
+                        if (childNode != null)
+                        {
+                            nodeStack.Push(childNode);
+                        }
+                    }
+                }
+
+                if (currentNode is not MeshNode meshNode)
+                {
+                    continue;
+                }
+
+                totalMeshCount++;
+
+                if (meshNode.Material is PBRMaterialCore pbrMaterial)
+                {
+                    var baseColor = pbrMaterial.BaseColor; // PBR 基础色
+                    var emissiveColor = pbrMaterial.EmissiveColor; // 自发光色
+                    var ambientColor = new SDX.Color4( // 计算增强的环境分量
+                        Math.Min(1f, baseColor.Red * 0.65f + emissiveColor.Red),
+                        Math.Min(1f, baseColor.Green * 0.65f + emissiveColor.Green),
+                        Math.Min(1f, baseColor.Blue * 0.65f + emissiveColor.Blue),
+                        1f);
+                    var phongMaterial = new PhongMaterialCore
+                    {
+                        DiffuseColor = new SDX.Color4(
+                            Math.Min(1f, baseColor.Red + 0.1f),
+                            Math.Min(1f, baseColor.Green + 0.1f),
+                            Math.Min(1f, baseColor.Blue + 0.1f),
+                            baseColor.Alpha),
+                        AmbientColor = ambientColor,
+                        EmissiveColor = new SDX.Color4(
+                            Math.Min(1f, emissiveColor.Red + 0.05f),
+                            Math.Min(1f, emissiveColor.Green + 0.05f),
+                            Math.Min(1f, emissiveColor.Blue + 0.05f),
+                            emissiveColor.Alpha),
+                        SpecularColor = new SDX.Color4(0.95f, 0.95f, 0.95f, 1f),
+                        SpecularShininess = Math.Max(32f, (1f - pbrMaterial.RoughnessFactor) * 160f)
+                    };
+
+                    meshNode.Material = phongMaterial;
+                    convertedMeshCount++;
+                    AppLogger.Info($"Mesh[{meshNode.Name ?? "<未命名>"}] PBR 材质已转换为 Blinn/Phong 管线。");
+                }
+                else
+                {
+                    retainedMeshCount++;
+                    if (meshNode.Material == null)
+                    {
+                        AppLogger.Info($"Mesh[{meshNode.Name ?? "<未命名>"}] 未设置材质，维持默认渲染技术。");
+                    }
+                }
+            }
+
+            AppLogger.Info($"材质处理完成：网格总数={totalMeshCount}，PBR 转换={convertedMeshCount}，原材质保留={retainedMeshCount}。");
         }
 
         /// <summary>
@@ -596,6 +682,13 @@ namespace WpfVideoPet
             if (!File.Exists(modelPath))
             {
                 AppLogger.Warn($"模型文件不存在：{modelPath}");
+                return null;
+            }
+
+            var extension = Path.GetExtension(modelPath); // 模型扩展名
+            if (!string.Equals(extension, ".glb", StringComparison.OrdinalIgnoreCase))
+            {
+                AppLogger.Warn($"当前仅支持 GLB 模型，拒绝加载：{modelPath}");
                 return null;
             }
 
@@ -658,7 +751,7 @@ namespace WpfVideoPet
         {
             return new AmbientLightNode
             {
-                Color = new SDX.Color4(0.2f, 0.2f, 0.2f, 1f)
+                Color = new SDX.Color4(0.45f, 0.45f, 0.45f, 1f)
             };
         }
 
@@ -669,8 +762,20 @@ namespace WpfVideoPet
         {
             return new DirectionalLightNode
             {
-                Color = new SDX.Color4(0.9f, 0.9f, 0.9f, 1f),
+                Color = new SDX.Color4(1.2f, 1.2f, 1.2f, 1f),
                 Direction = SDX.Vector3.Normalize(new SDX.Vector3(-1f, -1f, -1f))
+            };
+        }
+
+        /// <summary>
+        /// 创建辅助方向光以提升面部和背光区域亮度。
+        /// </summary>
+        private static DirectionalLightNode CreateFillLight()
+        {
+            return new DirectionalLightNode
+            {
+                Color = new SDX.Color4(0.6f, 0.6f, 0.7f, 1f),
+                Direction = SDX.Vector3.Normalize(new SDX.Vector3(0.5f, -0.3f, 0.2f))
             };
         }
 
