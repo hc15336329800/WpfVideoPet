@@ -627,31 +627,38 @@ namespace WpfVideoPet
 
                 if (meshNode.Material is PBRMaterialCore pbrMaterial)
                 {
-                    var baseColor = pbrMaterial.BaseColor; // PBR 基础色
+                    var baseColor = pbrMaterial.AlbedoColor; // PBR 基础色
                     var emissiveColor = pbrMaterial.EmissiveColor; // 自发光色
-                    var ambientColor = new SDX.Color4( // 计算增强的环境分量
-                        Math.Min(1f, baseColor.Red * 0.65f + emissiveColor.Red),
-                        Math.Min(1f, baseColor.Green * 0.65f + emissiveColor.Green),
-                        Math.Min(1f, baseColor.Blue * 0.65f + emissiveColor.Blue),
+                  
+                    var roughness = Math.Clamp(pbrMaterial.RoughnessFactor, 0f, 1f); // 粗糙度
+                    var diffuseFactor = 0.82f + 0.1f * roughness; // 漫反射衰减系数
+                    var ambientFactor = 0.18f + 0.32f * (1f - roughness); // 环境光系数
+                    var ambientColor = new SDX.Color4( // 计算较柔和的环境分量
+                        Math.Clamp(baseColor.Red * ambientFactor + emissiveColor.Red * 0.6f, 0f, 1f),
+                        Math.Clamp(baseColor.Green * ambientFactor + emissiveColor.Green * 0.6f, 0f, 1f),
+                        Math.Clamp(baseColor.Blue * ambientFactor + emissiveColor.Blue * 0.6f, 0f, 1f),
                         1f);
+                    var diffuseColor = new SDX.Color4( // 漫反射颜色
+                        Math.Clamp(baseColor.Red * diffuseFactor, 0f, 1f),
+                        Math.Clamp(baseColor.Green * diffuseFactor, 0f, 1f),
+                        Math.Clamp(baseColor.Blue * diffuseFactor, 0f, 1f),
+                        baseColor.Alpha);
+                    var specularShininess = 48f + (160f - 48f) * (1f - roughness); // 高光锐度
+
                     var phongMaterial = new PhongMaterialCore
                     {
-                        DiffuseColor = new SDX.Color4(
-                            Math.Min(1f, baseColor.Red + 0.1f),
-                            Math.Min(1f, baseColor.Green + 0.1f),
-                            Math.Min(1f, baseColor.Blue + 0.1f),
-                            baseColor.Alpha),
+                    
+                        DiffuseColor = diffuseColor,
                         AmbientColor = ambientColor,
-                        EmissiveColor = new SDX.Color4(
-                            Math.Min(1f, emissiveColor.Red + 0.05f),
-                            Math.Min(1f, emissiveColor.Green + 0.05f),
-                            Math.Min(1f, emissiveColor.Blue + 0.05f),
-                            emissiveColor.Alpha),
-                        SpecularColor = new SDX.Color4(0.95f, 0.95f, 0.95f, 1f),
-                        SpecularShininess = Math.Max(32f, (1f - pbrMaterial.RoughnessFactor) * 160f)
+                        EmissiveColor = emissiveColor,
+                     
+                        SpecularColor = new SDX.Color4(0.65f, 0.65f, 0.65f, 1f),
+                        SpecularShininess = specularShininess,
+                        DiffuseMap = pbrMaterial.AlbedoMap
                     };
 
                     meshNode.Material = phongMaterial;
+                    convertedMeshCount++;
                     convertedMeshCount++;
                     AppLogger.Info($"Mesh[{meshNode.Name ?? "<未命名>"}] PBR 材质已转换为 Blinn/Phong 管线。");
                 }
@@ -667,6 +674,7 @@ namespace WpfVideoPet
 
             AppLogger.Info($"材质处理完成：网格总数={totalMeshCount}，PBR 转换={convertedMeshCount}，原材质保留={retainedMeshCount}。");
         }
+
 
         /// <summary>
         /// 从指定路径加载模型并返回 HelixToolkitScene 对象。
