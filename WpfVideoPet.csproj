@@ -67,6 +67,10 @@
                 </None>
         </ItemGroup>
 
+        <ItemGroup>
+          <Service Include="{508349b6-6b84-4df5-91f0-309beebad82d}" />
+        </ItemGroup>
+
 
 	<Target Name="EnsureWpfVideoPetNotRunning" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
 		<Exec Command="taskkill /F /IM WpfVideoPet.exe" ContinueOnError="true" />

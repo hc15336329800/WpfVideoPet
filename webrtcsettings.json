@@ -48,7 +48,7 @@
     "slot": 1,
     "pollingIntervalMilliseconds": 3000,
     "statusPublishTopic": "lanmao001/plc/pub", //向指定的主题（Topic）推送一条消息。
-    "controlSubscribeTopic": "lanmao001/plc/sub", //向指定的主题（Topic）读取一条消息。
+    "controlSubscribeTopic": "lanmao001/plc/sub", //订阅题（Topic）读取一条消息。
     "statusArea": {
       "_comment": "轮询读取的 DB 区域。",
       "dbNumber": 200,
@@ -57,7 +57,7 @@
     },
     "controlArea": {
       "_comment": "允许写入的 DB 区域。",
-      "dbNumber": 100,
+      "dbNumber": 200,
       "startByte": 0,
       "byteLength": 3
     }

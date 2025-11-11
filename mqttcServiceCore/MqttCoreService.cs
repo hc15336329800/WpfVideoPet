@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 
 namespace WpfVideoPet.mqtt
 {
@@ -20,6 +21,8 @@ namespace WpfVideoPet.mqtt
         private readonly MqttConfig _config; // MQTT 配置
         private readonly MqttFactory _factory = new(); // MQTT 工厂
         private readonly SemaphoreSlim _connectLock = new(1, 1); // 连接互斥锁
+        private readonly object _subscriptionLock = new(); // 订阅集合锁
+        private readonly HashSet<string> _additionalTopics = new(StringComparer.OrdinalIgnoreCase); // 额外订阅主题集
         private IMqttClient? _client; // MQTT 客户端实例
         private bool _disposed; // 释放标记
 
@@ -171,27 +174,106 @@ namespace WpfVideoPet.mqtt
                 var options = BuildClientOptions();
                 await _client.ConnectAsync(options, cancellationToken).ConfigureAwait(false);
 
+                var qos = (MqttQualityOfServiceLevel)Math.Clamp(_config.Qos, 0, 2); // 订阅的 QoS
                 var downTopic = _config.DownlinkTopic; // 下行主题
                 if (!string.IsNullOrWhiteSpace(downTopic))
                 {
-                    var qos = (MqttQualityOfServiceLevel)Math.Clamp(_config.Qos, 0, 2); // 订阅的 QoS
-                    var filter = new MqttTopicFilterBuilder()
-                        .WithTopic(downTopic)
-                        .WithQualityOfServiceLevel(qos)
-                        .Build();
-
-                    await _client.SubscribeAsync(filter, cancellationToken).ConfigureAwait(false);
-                    AppLogger.Info($"已订阅 MQTT 下行主题: {downTopic}");
+                    await SubscribeTopicAsync(downTopic, qos, cancellationToken, "已订阅 MQTT 下行主题").ConfigureAwait(false);
                 }
                 else
                 {
                     AppLogger.Warn("未配置 MQTT 下行主题，接收功能已禁用。");
+                }
+                foreach (var extraTopic in SnapshotAdditionalTopics())
+                {
+                    if (string.IsNullOrWhiteSpace(extraTopic))
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(downTopic) && string.Equals(extraTopic, downTopic, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    await SubscribeTopicAsync(extraTopic, qos, cancellationToken, "已订阅 MQTT 额外主题").ConfigureAwait(false);
                 }
             }
             finally
             {
                 _connectLock.Release();
             }
+        }
+
+        /// <summary>
+        /// 记录额外的下行主题并在连接就绪时发起订阅，用于扩展监听 PLC 控制等自定义通道。
+        /// </summary>
+        /// <param name="topic">待订阅的主题名称，自动忽略空白值与重复请求。</param>
+        /// <param name="cancellationToken">外部取消令牌，便于在调用方关闭时提前退出。</param>
+        /// <returns>异步任务对象。</returns>
+        public async Task SubscribeAdditionalTopicAsync(string topic, CancellationToken cancellationToken = default)
+        {
+            if (_disposed || !_config.Enabled)
+            {
+                return;
+            }
+
+            var normalized = topic?.Trim(); // 规范化主题
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return;
+            }
+
+            lock (_subscriptionLock)
+            {
+                _additionalTopics.Add(normalized);
+            }
+
+            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+
+            if (_client == null || !_client.IsConnected)
+            {
+                return;
+            }
+
+            var qos = (MqttQualityOfServiceLevel)Math.Clamp(_config.Qos, 0, 2); // 订阅的 QoS
+            await SubscribeTopicAsync(normalized, qos, cancellationToken, "已订阅 MQTT 额外主题").ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 返回当前记录的额外主题快照，避免遍历过程中与新增操作发生竞争。
+        /// </summary>
+        /// <returns>包含所有额外主题的字符串数组。</returns>
+        private string[] SnapshotAdditionalTopics()
+        {
+            lock (_subscriptionLock)
+            {
+                return _additionalTopics.ToArray();
+            }
+        }
+
+        /// <summary>
+        /// 向 MQTT 服务器发送主题订阅请求，并输出统一的日志信息。
+        /// </summary>
+        /// <param name="topic">目标主题。</param>
+        /// <param name="qos">订阅所用的服务质量等级。</param>
+        /// <param name="cancellationToken">外部取消令牌。</param>
+        /// <param name="logPrefix">日志前缀，便于区分订阅来源。</param>
+        /// <returns>异步任务对象。</returns>
+        private async Task SubscribeTopicAsync(string topic, MqttQualityOfServiceLevel qos, CancellationToken cancellationToken, string logPrefix)
+        {
+            if (_client == null || !_client.IsConnected)
+            {
+                return;
+            }
+
+            var filter = new MqttTopicFilterBuilder() // 订阅过滤器
+                .WithTopic(topic)
+                .WithQualityOfServiceLevel(qos)
+                .Build();
+
+            await _client.SubscribeAsync(filter, cancellationToken).ConfigureAwait(false);
+            AppLogger.Info($"{logPrefix}: {topic}");
         }
 
         /// <summary>

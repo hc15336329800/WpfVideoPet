@@ -1,0 +1,10 @@
+﻿
+
+
+1) 能力 ID 不匹配（导致 AD_LoadKeywordFile=18601 的主因）
+
+1、组合功能一直包18601，单个正常 （下载组合能力包试试  不太记得了）
+2、一直提示找不到AikitDll.dll ： 最后解决  是我自己使用c++封装的dll是debug模式的  AikitDll.dll需要依赖ucrtbased.dll和vcruntime140d.dll，放入：C:\Windows\System32\  或者直接安装vs的c++编译环境即可
+
+
+

@@ -71,6 +71,7 @@ namespace WpfVideoPet.service
 
             if (!_controlSubscribed && !string.IsNullOrWhiteSpace(_config.ControlSubscribeTopic))
             {
+                await _mqttBridge.SubscribeAdditionalTopicAsync(_config.ControlSubscribeTopic, cancellationToken).ConfigureAwait(false);
                 _mqttBridge.MessageReceived += _controlHandler;
                 _controlSubscribed = true;
                 AppLogger.Info($"已挂载 PLC 控制消息回调，监听主题: {_config.ControlSubscribeTopic}");
