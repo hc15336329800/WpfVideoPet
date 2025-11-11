@@ -363,12 +363,7 @@ namespace WpfVideoPet.service
         }
 
         /// <summary>
-        /// 处理来自 MQTT 控制主题的指令。
-        /// </summary>
-        /// <param name="sender">事件源。</param>
-        /// <param name="message">定长消息内容。</param>
-        /// <summary>
-        /// 处理来自 MQTT 控制主题的指令。
+        /// 处理来自 MQTT 控制主题的指令，将 01 字符串转换为字节并写入 PLC DB 块。
         /// </summary>
         /// <param name="sender">事件源。</param>
         /// <param name="message">定长消息内容。</param>
@@ -392,6 +387,7 @@ namespace WpfVideoPet.service
                 AppLogger.Warn("PLC 控制消息为空，已忽略。");
                 return;
             }
+            AppLogger.Info($"接收到 PLC 控制原始消息，主题: {message.Topic}, 内容长度: {bitString.Length}, 内容(BIT): {bitString}");
 
             var sanitizedBits = new List<bool>(); // 解析后的位序列
             foreach (var ch in bitString)
@@ -417,27 +413,146 @@ namespace WpfVideoPet.service
                 return;
             }
 
-            var maxBits = _config.ControlArea.ByteLength * 8; // 控制区位容量
+            var area = _config.ControlArea; // 控制区域配置
+            if (area.ByteLength <= 0)
+            {
+                AppLogger.Warn("PLC 控制区域字节长度未配置，写入操作已跳过。");
+                return;
+            }
+
+            var maxBits = area.ByteLength * 8; // 控制区位容量
             if (sanitizedBits.Count > maxBits)
             {
                 AppLogger.Warn($"控制位数量超出配置容量，将截断至 {maxBits} 位。");
                 sanitizedBits = sanitizedBits.Take(maxBits).ToList();
             }
 
-            var bitArray = sanitizedBits.ToArray(); // 转换为数组供写入
-            AppLogger.Info($"收到 PLC 控制批量写入请求，位数: {bitArray.Length}");
+            if (sanitizedBits.Count < maxBits)
+            {
+                var paddingCount = maxBits - sanitizedBits.Count; // 需要补齐的位数
+                sanitizedBits.AddRange(Enumerable.Repeat(false, paddingCount));
+                AppLogger.Info($"控制位数量不足 {maxBits} 位，已在尾部补齐 {paddingCount} 位 0。");
+            }
+
+            var finalBitString = new string(sanitizedBits.Select(b => b ? '1' : '0').ToArray()); // 用于日志输出的最终位串
+            var controlBuffer = BuildControlBuffer(sanitizedBits, area.ByteLength); // 转换后的控制区字节
+            var hexPayload = BitConverter.ToString(controlBuffer).Replace("-", string.Empty); // 十六进制展示
+
+            AppLogger.Info($"准备写入 PLC 控制区，字节数: {controlBuffer.Length}, 数据(HEX): {hexPayload}, 数据(BIT): {finalBitString}");
 
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    await WriteControlBitsAsync(bitArray, CancellationToken.None).ConfigureAwait(false);
+                    await WriteControlBytesAsync(controlBuffer, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
                     AppLogger.Error(ex, "批量写入 PLC 控制位失败。");
                 }
             });
+        }
+        /// <summary>
+        /// 将处理后的字节缓冲写入 PLC 控制区 DB 块。
+        /// </summary>
+        /// <param name="buffer">目标写入数据。</param>
+        /// <param name="cancellationToken">外部取消令牌。</param>
+        public async Task WriteControlBytesAsync(byte[] buffer, CancellationToken cancellationToken = default)
+        {
+            if (buffer == null)
+            {
+                throw new ArgumentNullException(nameof(buffer));
+            }
+
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(SiemensS7Service));
+            }
+
+            if (!_config.Enabled)
+            {
+                return;
+            }
+
+            var area = _config.ControlArea; // 控制区配置
+            if (area.ByteLength <= 0)
+            {
+                AppLogger.Warn("PLC 控制区域字节长度未配置，写入操作已跳过。");
+                return;
+            }
+
+            byte[] normalizedBuffer; // 规范化后的写入数据
+            if (buffer.Length == area.ByteLength)
+            {
+                normalizedBuffer = buffer;
+            }
+            else
+            {
+                normalizedBuffer = new byte[area.ByteLength];
+                var copyLength = Math.Min(buffer.Length, normalizedBuffer.Length); // 实际复制长度
+                Array.Copy(buffer, normalizedBuffer, copyLength);
+
+                if (buffer.Length != area.ByteLength)
+                {
+                    AppLogger.Warn($"控制区写入数据长度与配置不符，已调整为 {area.ByteLength} 字节 (输入 {buffer.Length} 字节)。");
+                }
+            }
+
+            await EnsurePlcConnectedAsync(cancellationToken).ConfigureAwait(false);
+
+            await _plcLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (_plc == null)
+                {
+                    return;
+                }
+
+                await Task.Run(() => _plc.WriteBytes(DataType.DataBlock, area.DbNumber, area.StartByte, normalizedBuffer), cancellationToken)
+                    .ConfigureAwait(false);
+                var hexPayload = BitConverter.ToString(normalizedBuffer).Replace("-", string.Empty); // 写入数据的十六进制表示
+                AppLogger.Info($"已向 PLC 控制区写入 {normalizedBuffer.Length} 字节，数据(HEX): {hexPayload}");
+            }
+            finally
+            {
+                _plcLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// 将布尔位集合转换为 PLC 写入所需的字节数组，低位在前按位拼接。
+        /// </summary>
+        /// <param name="bits">已经清理与补齐的布尔位集合。</param>
+        /// <param name="byteLength">目标输出字节长度。</param>
+        /// <returns>与控制区字节长度匹配的缓冲区。</returns>
+        private static byte[] BuildControlBuffer(IReadOnlyList<bool> bits, int byteLength)
+        {
+            if (bits == null)
+            {
+                throw new ArgumentNullException(nameof(bits));
+            }
+
+            if (byteLength <= 0)
+            {
+                return Array.Empty<byte>();
+            }
+
+            var buffer = new byte[byteLength]; // 输出缓冲
+            var maxBits = byteLength * 8; // 最大位数
+
+            for (var i = 0; i < maxBits && i < bits.Count; i++)
+            {
+                if (!bits[i])
+                {
+                    continue;
+                }
+
+                var byteIndex = i / 8; // 目标字节索引
+                var bitOffset = i % 8; // 位偏移
+                buffer[byteIndex] |= (byte)(1 << bitOffset);
+            }
+
+            return buffer;
         }
 
 
