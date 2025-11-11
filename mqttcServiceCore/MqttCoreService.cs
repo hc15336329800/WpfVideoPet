@@ -253,10 +253,10 @@ namespace WpfVideoPet.mqtt
         }
 
         /// <summary>
-        /// 向 MQTT 服务器发送主题订阅请求，并输出统一的日志信息。
+        /// 向 MQTT 服务器发送订阅请求，并校验返回码，确保主题真正被 Broker 接受。
         /// </summary>
         /// <param name="topic">目标主题。</param>
-        /// <param name="qos">订阅所用的服务质量等级。</param>
+        /// <param name="qos">请求的 QoS 等级。</param>
         /// <param name="cancellationToken">外部取消令牌。</param>
         /// <param name="logPrefix">日志前缀，便于区分订阅来源。</param>
         /// <returns>异步任务对象。</returns>
@@ -272,8 +272,35 @@ namespace WpfVideoPet.mqtt
                 .WithQualityOfServiceLevel(qos)
                 .Build();
 
-            await _client.SubscribeAsync(filter, cancellationToken).ConfigureAwait(false);
-            AppLogger.Info($"{logPrefix}: {topic}");
+
+            var subscribeResult = await _client.SubscribeAsync(filter, cancellationToken).ConfigureAwait(false); // 订阅结果
+            if (subscribeResult?.Items == null || subscribeResult.Items.Count == 0)
+            {
+                AppLogger.Warn($"{logPrefix}: {topic} 返回空的结果集，无法确认订阅是否成功。");
+                return;
+            }
+
+            var failedItems = new List<MqttClientSubscribeResultItem>(); // 失败的返回项
+            foreach (var item in subscribeResult.Items)
+            {
+                if (item.ResultCode != MqttClientSubscribeResultCode.GrantedQoS0 &&
+                    item.ResultCode != MqttClientSubscribeResultCode.GrantedQoS1 &&
+                    item.ResultCode != MqttClientSubscribeResultCode.GrantedQoS2)
+                {
+                    failedItems.Add(item);
+                }
+            }
+
+            if (failedItems.Count > 0)
+            {
+                var reasons = string.Join(", ", failedItems.Select(i => $"[{i.TopicFilter?.Topic ?? "未知"}:{i.ResultCode}]")).Trim();
+                var message = $"订阅 MQTT 主题失败: {topic}, 原因: {reasons}";
+                AppLogger.Error(message);
+                throw new InvalidOperationException(message);
+            }
+
+            var granted = string.Join(", ", subscribeResult.Items.Select(i => $"{i.TopicFilter?.Topic ?? topic}:{i.ResultCode}"));
+            AppLogger.Info($"{logPrefix}: {topic} (Granted={granted})");
         }
 
         /// <summary>
