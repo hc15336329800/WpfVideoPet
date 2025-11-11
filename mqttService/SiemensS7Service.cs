@@ -1,12 +1,10 @@
 ﻿﻿using S7.Net;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
+ using System.Linq;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
+ using System.Threading.Tasks;
 using WpfVideoPet.mqtt;
 using static WpfVideoPet.mqtt.MqttCoreService;
 
@@ -21,10 +19,7 @@ namespace WpfVideoPet.service
         private readonly MqttCoreService _mqttBridge; // MQTT 桥接实例
         private readonly SemaphoreSlim _plcLock = new(1, 1); // PLC 访问锁
         private readonly EventHandler<MqttBridgeMessage> _controlHandler; // 控制消息处理器
-        private readonly JsonSerializerOptions _jsonOptions = new() // JSON 序列化配置
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
+  
         private Plc? _plc; // PLC 客户端实例
         private bool _disposed; // 释放标记
         private bool _controlSubscribed; // 控制订阅状态
@@ -304,6 +299,7 @@ namespace WpfVideoPet.service
             }
             finally
             {
+                _disposed = true;
                 _plcLock.Dispose();
             }
         }
@@ -517,7 +513,7 @@ namespace WpfVideoPet.service
         }
 
         /// <summary>
-        /// 按照固定周期轮询 PLC 状态并通过 MQTT 发布 JSON 报文。
+        /// 按照固定周期轮询 PLC 状态并通过 MQTT 发布字符串报文。
         /// </summary>
         /// <param name="cancellationToken">用于终止任务的取消标记。</param>
         private async Task RunStatusPollingLoopAsync(CancellationToken cancellationToken)
@@ -529,17 +525,26 @@ namespace WpfVideoPet.service
                 try
                 {
                     var statusBytes = await ReadStatusAreaAsync(cancellationToken).ConfigureAwait(false);
-                    var payload = BuildStatusPayload(statusBytes); // JSON 报文
+                    var payload = BuildStatusPayload(statusBytes); // 字符串报文
 
                     if (payload != null)
                     {
                         await _mqttBridge.SendStringAsync(payload, Encoding.UTF8, _config.StatusPublishTopic, false, cancellationToken)
                             .ConfigureAwait(false);
-                        AppLogger.Info($"已发布 PLC 状态，字节数: {statusBytes.Length}");
+                        //AppLogger.Info($"已发布 PLC 状态，字节数: {statusBytes.Length}");
+                        // 新增日志输出，显示十六进制与字符串
+                        var hexString = BitConverter.ToString(Encoding.UTF8.GetBytes(payload)).Replace("-", "");
+                        AppLogger.Info($"已发送 MQTT 消息，主题: {_config.StatusPublishTopic}, 长度: {payload.Length}, 内容(HEX): {hexString}, 内容(STR): {payload}");
+
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    break;
+                }
+                catch (ObjectDisposedException ex)
+                {
+                    AppLogger.Warn( "PLC 服务已被释放，状态轮询任务即将退出。"+ex);
                     break;
                 }
                 catch (Exception ex)
@@ -558,17 +563,11 @@ namespace WpfVideoPet.service
             }
         }
         private const int StatusDataBitLength = 16; // PLC 状态位固定长度
-
         /// <summary>
-        /// 将 PLC 状态字节转换为 JSON 文本，包含时间戳、错误码与数据字段。
+        /// 将 PLC 状态字节整理为业务所需的位字符串，避免额外的 JSON 封装。
         /// </summary>
         /// <param name="statusBytes">PLC 返回的状态字节。</param>
-        /// <returns>可发布的 JSON 字符串。</returns>
-        /// <summary>
-        /// 将 PLC 状态字节转换为 JSON 文本，包含错误码与二进制数据字段。
-        /// </summary>
-        /// <param name="statusBytes">PLC 返回的状态字节。</param>
-        /// <returns>可发布的 JSON 字符串。</returns>
+        /// <returns>按位编码的字符串，如果无有效数据则返回 null。</returns>
         private string? BuildStatusPayload(byte[] statusBytes)
         {
             if (statusBytes == null || statusBytes.Length == 0)
@@ -579,13 +578,8 @@ namespace WpfVideoPet.service
 
             var bitString = ConvertToBitString(statusBytes); // 状态位字符串
             var normalizedData = NormalizeBitString(bitString, StatusDataBitLength); // 裁剪后的状态位
-            var envelope = new
-            {
-                err = 0,
-                data = normalizedData
-            };
 
-            return JsonSerializer.Serialize(envelope, _jsonOptions);
+            return normalizedData;
         }
 
 
