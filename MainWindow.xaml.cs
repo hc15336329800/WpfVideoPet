@@ -82,6 +82,8 @@ namespace WpfVideoPet
         private const string DuckingReasonTts = "AI_CHAT_TTS"; // TTS 播报压制标识
         private const string DuckingReasonVideoCall = "VIDEO_CALL_WINDOW"; // 视频通话压制标识
         private SiemensS7Service? _plcService; // PLC 服务实例
+        private PlcSubTestService? _plcSubTestService; //  测试
+
 
 
         // 构造函数
@@ -203,7 +205,11 @@ namespace WpfVideoPet
                 }
                 else
                 {
-                    _plcService = new SiemensS7Service(_appConfig, _mqttBridge); // 创建 PLC 服务
+                    _plcSubTestService = new PlcSubTestService(_appConfig, _mqttBridge); // 创建 PLC 服务
+
+                    _plcService = new SiemensS7Service(_appConfig, _mqttBridge); // 测试订阅
+
+
                     _ = StartPlcServiceAsync();
                 }
             }
@@ -1357,8 +1363,15 @@ namespace WpfVideoPet
 
             try
             {
+                AppLogger.Info("_plcSubTestService 订阅测试服务启动流程已完成调度。");
+
+                await _plcSubTestService.StartAsync().ConfigureAwait(false);
+
+
                 await _plcService.StartAsync().ConfigureAwait(false);
                 AppLogger.Info("Siemens S7 服务启动流程已完成调度。");
+
+
             }
             catch (Exception ex)
             {
