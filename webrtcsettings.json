@@ -39,7 +39,13 @@
     "connectionTimeout": 10
   },
 
-  "plc": {
+  "mqtt_video": {
+    "_comment": "订阅的视频主题",
+    "topic": "lanmao001/video/sub" //视频订阅的默认主题␊
+  },
+
+
+  "mqtt_plc": {
     "_comment": "西门子 S7 PLC 参数，包含轮询与控制区配置。",
     "enabled": true,
     "cpuType": "S71200",

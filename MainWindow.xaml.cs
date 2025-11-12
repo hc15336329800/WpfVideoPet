@@ -81,8 +81,11 @@ namespace WpfVideoPet
         private const string DuckingReasonAiChat = "AI_CHAT_WINDOW"; // AI 弹窗压制标识
         private const string DuckingReasonTts = "AI_CHAT_TTS"; // TTS 播报压制标识
         private const string DuckingReasonVideoCall = "VIDEO_CALL_WINDOW"; // 视频通话压制标识
-        private SiemensS7Service? _plcService; // PLC 服务实例
-        private PlcSubTestService? _plcSubTestService; //  测试
+        private RemoteMediaService? _remoteMediaService; // PLC 视频服务实例
+        private SiemensS7Service? _plcService; // PLC mqtt服务实例
+        private PlcSubTestService? _plcSubTestService; // PLC 测试服务实例
+
+
 
 
 
@@ -197,6 +200,8 @@ namespace WpfVideoPet
             _wakeService = new AikitWakeService(_appConfig.Wake.SdkDirectory);
             InitializeWakeService();
 
+
+            // MQTT桥接服务启动
             if (_appConfig.Plc.Enabled)
             {
                 if (_mqttBridge == null)
@@ -205,10 +210,22 @@ namespace WpfVideoPet
                 }
                 else
                 {
-                    _plcSubTestService = new PlcSubTestService(_appConfig, _mqttBridge); // PLC 订阅测试服务
-                    //_plcService = new SiemensS7Service(_appConfig.Plc, _mqttBridge); // PLC 主服务  临时注释
+                    // 常规方法测试
+                    //var plcTopic = Convert.ToString(_appConfig.Plc.ControlSubscribeTopic); // 读取配置文件
+                    //_plcSubTestService = new PlcSubTestService(plcTopic, _mqttBridge); // PLC 订阅测试服务
 
-                    _ = StartPlcServiceAsync();
+                    // 自定义主题测试
+                    //_plcSubTestService = new PlcSubTestService("lanmao001/plc/sub117", _mqttBridge); // PLC 订阅测试服务
+
+
+
+
+                    //todo:  1、完善RemoteMediaService中的构造函数 使其能接收字符串， 2、读取配置文件的mqtt_video中的主题参数  赋值给构造参数
+                    _remoteMediaService = new RemoteMediaService(plcTopic, _mqttBridge); // PLC 订阅测试服务
+
+                    _plcService = new SiemensS7Service(_appConfig.Plc, _mqttBridge); // PLC mqtt服务 
+
+                    _ = StartPlcServiceAsync(); //执行逻辑
                 }
             }
             else
@@ -1371,11 +1388,6 @@ namespace WpfVideoPet
         /// </summary>
         private async Task StartPlcServiceAsync()
         {
-            if (_plcService == null)
-            {
-                return;
-            }
-
             try
             {
                 if (_plcSubTestService != null)
@@ -1388,14 +1400,22 @@ namespace WpfVideoPet
                     AppLogger.Warn("PLC 订阅测试服务未初始化，跳过附加主题订阅。");
                 }
 
-                await _plcService.StartAsync().ConfigureAwait(false);
-                AppLogger.Info("Siemens S7 服务启动流程已完成调度。");
+                if (_plcService != null)
+                {
+                    await _plcService.StartAsync().ConfigureAwait(false);
+                    AppLogger.Info("Siemens S7 服务启动流程已完成调度。");
+                }
+                else
+                {
+                    AppLogger.Info("Siemens S7 服务暂未初始化，仅启动 PLC 订阅测试服务。");
+                }
             }
             catch (Exception ex)
             {
                 AppLogger.Error(ex, "Siemens S7 服务启动失败。");
             }
         }
+
 
         private void InitializeWakeService()
         {

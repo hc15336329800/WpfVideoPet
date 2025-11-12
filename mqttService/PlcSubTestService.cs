@@ -27,7 +27,7 @@ namespace WpfVideoPet.service
         private bool _topicSubscribed; // 是否已完成主题订阅
 
         // [常量] 默认 PLC 订阅主题
-        private const string PlcSubTopic = "lanmao001/plc/sub";
+        private const string PlcSubTopic = "lanmao001/plc/sub1";  //优先使用外部传来的主题名称
 
         /// <summary>
         /// 使用默认 PLC 订阅主题初始化服务。
@@ -45,12 +45,12 @@ namespace WpfVideoPet.service
         /// <summary>
         /// 使用应用配置中的 PLC 控制主题初始化服务，自动回落到默认主题。
         /// </summary>
-        /// <param name="config">包含 PLC 主题配置的应用配置。</param>
         /// <param name="bridge">复用的 MQTT 桥接实例。</param>
-        public PlcSubTestService(AppConfig config, MqttCoreService bridge)
+        /// <param name="topic">外部提供的主题。</param>
+        public PlcSubTestService(string? topic, MqttCoreService bridge)
             : this(
                 bridge,
-                ResolveConfiguredTopic(config ?? throw new ArgumentNullException(nameof(config)), out var usingFallback),
+                ResolveConfiguredTopic(topic, out var usingFallback),
                 usingFallback)
         {
         }
@@ -157,28 +157,24 @@ namespace WpfVideoPet.service
             _selfTestCompletion.TrySetCanceled();
             return ValueTask.CompletedTask;
         }
-
         /// <summary>
-        /// 解析配置中的 PLC 控制主题，空值时回落到默认主题。
+        /// 解析外部提供的 PLC 控制主题，若为空则回落到默认值。
         /// </summary>
-        /// <param name="config">应用配置实例。</param>
+        /// <param name="topic">外部传入的主题。</param>
         /// <param name="usingFallback">输出指示：true 表示使用默认主题。</param>
         /// <returns>最终确定的订阅主题。</returns>
-        private static string ResolveConfiguredTopic(AppConfig config, out bool usingFallback)
+        private static string ResolveConfiguredTopic(string? topic, out bool usingFallback)
         {
-            if (config.Plc != null)
+            if (!string.IsNullOrWhiteSpace(topic))
             {
-                var candidate = config.Plc.ControlSubscribeTopic;
-                if (!string.IsNullOrWhiteSpace(candidate))
-                {
-                    usingFallback = false;
-                    return NormalizeTopic(candidate);
-                }
+                usingFallback = false;
+                return NormalizeTopic(topic);
             }
 
             usingFallback = true;
             return PlcSubTopic;
         }
+
 
         /// <summary>
         /// 规范化主题字符串，移除首尾空白。
