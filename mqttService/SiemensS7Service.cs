@@ -4,6 +4,8 @@ using System.Text;
 using WpfVideoPet.mqtt;
 using static WpfVideoPet.mqtt.MqttCoreService;
 using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace WpfVideoPet.service
 {
@@ -361,8 +363,8 @@ namespace WpfVideoPet.service
         }
 
         /// <summary>
-        /// 处理来自 MQTT 控制主题的指令，提取首个置位请求并写入目标 PLC 控制位。
-        /// 仅关注消息中的第一个 '1' 字符，其余位保持原状，满足单点触发的需求。
+        /// 处理来自 MQTT 控制主题的指令，将消息中的位字符串解析为控制位批量写入 PLC。
+        /// 支持同时置位与复位多个通道，遇到非法字符时立即忽略本次写入。
         /// </summary>
         /// <param name="sender">事件源。</param>
         /// <param name="message">定长消息内容。</param>
@@ -380,7 +382,7 @@ namespace WpfVideoPet.service
                 return;
             }
 
-            var bitString = Encoding.UTF8.GetString(message.Payload.Span).Trim();
+            var bitString = Encoding.UTF8.GetString(message.Payload.Span).Trim(); // 原始控制字符串
             if (string.IsNullOrWhiteSpace(bitString))
             {
                 AppLogger.Warn("PLC 控制消息为空，已忽略。");
@@ -388,18 +390,28 @@ namespace WpfVideoPet.service
             }
             AppLogger.Info($"接收到 PLC 控制原始消息，主题: {message.Topic}, 内容长度: {bitString.Length}, 内容(BIT): {bitString}");
 
-            var bitCount = 0; // 控制消息的位总数
-            int? targetBitIndex = null; // 首个需要置位的位索引
+            var area = _config.ControlArea; // 控制区域配置
+            if (area.ByteLength <= 0)
+            {
+                AppLogger.Warn("PLC 控制区域字节长度未配置，写入操作已跳过。");
+                return;
+            }
+
+            var maxBits = area.ByteLength * 8; // 控制区位容量
+            var parsedBits = new List<bool>(maxBits); // 已解析的控制位集合
+            var truncated = false; // 是否出现截断
             foreach (var ch in bitString)
             {
                 if (ch == '0' || ch == '1')
                 {
-                    if (ch == '1' && targetBitIndex == null)
+                    if (parsedBits.Count < maxBits)
                     {
-                        targetBitIndex = bitCount;
+                        parsedBits.Add(ch == '1');
                     }
-
-                    bitCount++;
+                    else
+                    {
+                        truncated = true;
+                    }
                     continue;
                 }
 
@@ -410,45 +422,36 @@ namespace WpfVideoPet.service
                 }
             }
 
-            if (bitCount == 0)
+            if (parsedBits.Count == 0)
             {
                 AppLogger.Warn("PLC 控制消息未包含有效位信息，已忽略。");
                 return;
             }
 
-            if (targetBitIndex == null)
+            if (truncated)
             {
-                AppLogger.Info("PLC 控制消息未请求置位任何通道，已忽略。");
-                return;
+                AppLogger.Warn($"PLC 控制消息长度超出配置容量，已仅保留前 {maxBits} 位。");
             }
 
-            var area = _config.ControlArea; // 控制区域配置
-            if (area.ByteLength <= 0)
+            var targetBits = new bool[maxBits]; // 最终写入位缓冲
+            for (var i = 0; i < parsedBits.Count; i++)
             {
-                AppLogger.Warn("PLC 控制区域字节长度未配置，写入操作已跳过。");
-                return;
+                targetBits[i] = parsedBits[i];
             }
 
-            var maxBits = area.ByteLength * 8; // 控制区位容量
-            if (targetBitIndex.Value >= maxBits)
-            {
-                AppLogger.Warn($"PLC 控制位索引 {targetBitIndex.Value} 超出配置容量 {maxBits}，已忽略。");
-                return;
-            }
-
-            var selectedIndex = targetBitIndex.Value; // 目标位索引
-            AppLogger.Info($"准备写入 PLC 控制位，DB: {area.DbNumber}, 起始字节: {area.StartByte}, 目标位索引: {selectedIndex}。");
+            var normalizedPayload = string.Concat(targetBits.Select(bit => bit ? '1' : '0')); // 日志使用的最终位串
+            AppLogger.Info($"准备批量写入 PLC 控制位，DB: {area.DbNumber}, 起始字节: {area.StartByte}, 写入位数: {parsedBits.Count}, 最终(BIT): {normalizedPayload}");
 
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    await WriteControlBitAsync(selectedIndex, true, CancellationToken.None).ConfigureAwait(false);
-                    AppLogger.Info($"已写入 PLC 控制位，索引: {selectedIndex}。");
+                    await WriteControlBitsAsync(targetBits, CancellationToken.None).ConfigureAwait(false);
+                    AppLogger.Info($"已批量写入 PLC 控制位，长度: {targetBits.Length}。");
                 }
                 catch (Exception ex)
                 {
-                    AppLogger.Error(ex, $"写入 PLC 控制位 {selectedIndex} 失败。");
+                    AppLogger.Error(ex, "批量写入 PLC 控制位失败。");
                 }
             });
         }
