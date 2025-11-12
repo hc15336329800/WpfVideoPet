@@ -17,12 +17,14 @@ namespace WpfVideoPet
         public OverlayRenderConfig OverlayRender { get; } = new(); // 叠加层渲染配置
 
         public MqttConfig Mqtt { get; } = new();
+        public MqttVideoConfig MqttVideo { get; } = new();
+
         public AudioDuckingConfig AudioDucking { get; } = new();
         public WakeConfig Wake { get; } = new();
         /// <summary>
         /// 西门子 PLC 配置段。
         /// </summary>
-        public PlcConfig Plc { get; } = new();
+        public PlcConfig MqttPlc { get; } = new();
 
         public bool IsOperator => string.Equals(Role, "operator", StringComparison.OrdinalIgnoreCase);
 
@@ -157,9 +159,22 @@ namespace WpfVideoPet
                         {
                             mqtt.ConnectionTimeout = Math.Max(0, timeoutValue);
                         }
-                        if (root.TryGetProperty("plc", out var plcElement) && plcElement.ValueKind == JsonValueKind.Object)
+                        if (root.TryGetProperty("mqtt_video", out var mqttVideoElement) && mqttVideoElement.ValueKind == JsonValueKind.Object)
                         {
-                            var plc = config.Plc;
+                            var video = config.MqttVideo;
+
+                            if (mqttVideoElement.TryGetProperty("topic", out var videoTopicElement))
+                            {
+                                var value = videoTopicElement.GetString();
+                                if (!string.IsNullOrWhiteSpace(value))
+                                {
+                                    video.Topic = value.Trim();
+                                }
+                            }
+                        }
+                        if (root.TryGetProperty("mqtt_plc", out var plcElement) && plcElement.ValueKind == JsonValueKind.Object)
+                        {
+                            var plc = config.MqttPlc;
 
                             if (plcElement.TryGetProperty("enabled", out var plcEnabledElement) && plcEnabledElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
                             {
@@ -226,39 +241,41 @@ namespace WpfVideoPet
                             {
                                 ApplyAreaConfig(controlAreaElement, plc.ControlArea);
                             }
+
+
                         }
-                    }
 
-                    if (root.TryGetProperty("audio", out var audioElement) && audioElement.ValueKind == JsonValueKind.Object)
-                    {
-                        if (audioElement.TryGetProperty("ducking", out var duckingElement) && duckingElement.ValueKind == JsonValueKind.Object)
+                        if (root.TryGetProperty("audio", out var audioElement) && audioElement.ValueKind == JsonValueKind.Object)
                         {
-                            var ducking = config.AudioDucking;
+                            if (audioElement.TryGetProperty("ducking", out var duckingElement) && duckingElement.ValueKind == JsonValueKind.Object)
+                            {
+                                var ducking = config.AudioDucking;
 
-                            if (duckingElement.TryGetProperty("enabled", out var duckEnabledElement) && duckEnabledElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
-                            {
-                                ducking.Enabled = duckEnabledElement.GetBoolean();
-                            }
+                                if (duckingElement.TryGetProperty("enabled", out var duckEnabledElement) && duckEnabledElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                                {
+                                    ducking.Enabled = duckEnabledElement.GetBoolean();
+                                }
 
-                            if (duckingElement.TryGetProperty("restoreDelaySeconds", out var restoreDelayElement) && restoreDelayElement.TryGetInt32(out var restoreDelaySeconds))
-                            {
-                                ducking.RestoreDelaySeconds = Math.Max(0, restoreDelaySeconds);
-                            }
-                            if (duckingElement.TryGetProperty("targetVolumePercentage", out var targetVolumeElement) && targetVolumeElement.TryGetInt32(out var targetVolume))
-                            {
-                                ducking.TargetVolumePercentage = Math.Clamp(targetVolume, 0, 100);
+                                if (duckingElement.TryGetProperty("restoreDelaySeconds", out var restoreDelayElement) && restoreDelayElement.TryGetInt32(out var restoreDelaySeconds))
+                                {
+                                    ducking.RestoreDelaySeconds = Math.Max(0, restoreDelaySeconds);
+                                }
+                                if (duckingElement.TryGetProperty("targetVolumePercentage", out var targetVolumeElement) && targetVolumeElement.TryGetInt32(out var targetVolume))
+                                {
+                                    ducking.TargetVolumePercentage = Math.Clamp(targetVolume, 0, 100);
+                                }
                             }
                         }
-                    }
 
-                    if (root.TryGetProperty("wake", out var wakeElement) && wakeElement.ValueKind == JsonValueKind.Object)
-                    {
-                        if (wakeElement.TryGetProperty("sdkDirectory", out var sdkElement))
+                        if (root.TryGetProperty("wake", out var wakeElement) && wakeElement.ValueKind == JsonValueKind.Object)
                         {
-                            var value = sdkElement.GetString();
-                            if (!string.IsNullOrWhiteSpace(value))
+                            if (wakeElement.TryGetProperty("sdkDirectory", out var sdkElement))
                             {
-                                config.Wake.SdkDirectory = value.Trim();
+                                var value = sdkElement.GetString();
+                                if (!string.IsNullOrWhiteSpace(value))
+                                {
+                                    config.Wake.SdkDirectory = value.Trim();
+                                }
                             }
                         }
                     }
@@ -591,6 +608,14 @@ public sealed class MqttConfig
             return string.IsNullOrWhiteSpace(ClientId) ? string.Empty : $"tr_{ClientId}";
         }
     }
+}
+
+// <summary>
+/// 描述远程媒体订阅的基础配置，目前仅包含主题设置。
+/// </summary>
+public sealed class MqttVideoConfig
+{
+    public string Topic { get; set; } = string.Empty; // 订阅的主题
 }
 
 

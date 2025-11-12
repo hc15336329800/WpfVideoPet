@@ -49,7 +49,6 @@ namespace WpfVideoPet
         private readonly AppConfig _appConfig;
         private readonly AudioDuckingConfig _audioDuckingConfig;
         private MqttCoreService? _mqttBridge; // MQTT 桥接实例
-        private RemoteMediaService? _mqttService; // MQTT 任务服务
         private readonly HttpClient _httpClient = new();
         private readonly string _mediaCacheDirectory;
         private readonly ConcurrentDictionary<string, Task<string?>> _mediaDownloadTasks = new(StringComparer.OrdinalIgnoreCase);
@@ -202,7 +201,7 @@ namespace WpfVideoPet
 
 
             // MQTT桥接服务启动
-            if (_appConfig.Plc.Enabled)
+            if (_appConfig.MqttPlc.Enabled)
             {
                 if (_mqttBridge == null)
                 {
@@ -211,7 +210,7 @@ namespace WpfVideoPet
                 else
                 {
                     // 常规方法测试
-                    //var plcTopic = Convert.ToString(_appConfig.Plc.ControlSubscribeTopic); // 读取配置文件
+                    //var plcTopic = Convert.ToString(_appConfig.MqttPlc.ControlSubscribeTopic); // 读取配置文件
                     //_plcSubTestService = new PlcSubTestService(plcTopic, _mqttBridge); // PLC 订阅测试服务
 
                     // 自定义主题测试
@@ -220,12 +219,14 @@ namespace WpfVideoPet
 
 
 
-                    //todo:  1、完善RemoteMediaService中的构造函数 使其能接收字符串， 2、读取配置文件的mqtt_video中的主题参数  赋值给构造参数
-                    _remoteMediaService = new RemoteMediaService(plcTopic, _mqttBridge); // PLC 订阅测试服务
+                    var configuredVideoTopic = _appConfig.MqttVideo.Topic; // 配置的视频主题
+                    var activeVideoTopic = EnsureRemoteMediaServiceInitialized(configuredVideoTopic); // 实际启用的主题
+                    if (!string.IsNullOrWhiteSpace(activeVideoTopic))
+                    {
+                        AppLogger.Info($"远程媒体服务已就绪，当前订阅主题: {activeVideoTopic}");
+                    }
 
-                    _plcService = new SiemensS7Service(_appConfig.Plc, _mqttBridge); // PLC mqtt服务 
-
-                    _ = StartPlcServiceAsync(); //执行逻辑
+                    _plcService = new SiemensS7Service(_appConfig.MqttPlc, _mqttBridge); // PLC mqtt服务
                 }
             }
             else
@@ -663,21 +664,62 @@ namespace WpfVideoPet
             }
 
             _mqttBridge ??= new MqttCoreService(_appConfig.Mqtt);
-            _mqttService = new RemoteMediaService(_mqttBridge);
-            _mqttService.RemoteMediaReceived += OnRemoteMediaTaskReceived;
+            var resolvedTopic = EnsureRemoteMediaServiceInitialized(); // 实际订阅的主题
 
-            _ = _mqttService.StartAsync().ContinueWith(task =>
+            if (!string.IsNullOrWhiteSpace(resolvedTopic))
+            {
+                AppLogger.Info($"MQTT 服务启动完成，订阅主题: {resolvedTopic}");
+            }
+        }
+
+        /// <summary>
+        /// 根据配置初始化远程媒体服务，返回实际订阅的主题名称。
+        /// </summary>
+        /// <param name="preferredTopic">外部期望的优先主题。</param>
+        /// <returns>实际使用的订阅主题，失败时返回空字符串。</returns>
+        private string EnsureRemoteMediaServiceInitialized(string? preferredTopic = null)
+        {
+            if (_mqttBridge == null)
+            {
+                AppLogger.Warn("MQTT 桥接未初始化，无法启动远程媒体服务。");
+                return string.Empty;
+            }
+
+            var configuredTopic = preferredTopic; // 首选主题
+            if (string.IsNullOrWhiteSpace(configuredTopic))
+            {
+                configuredTopic = _appConfig.MqttVideo.Topic; // 配置主题
+            }
+
+            if (string.IsNullOrWhiteSpace(configuredTopic))
+            {
+                configuredTopic = _mqttBridge.DownlinkTopic; // 桥接默认主题
+            }
+
+            var resolvedTopic = configuredTopic?.Trim() ?? string.Empty; // 最终主题
+
+            if (_remoteMediaService != null)
+            {
+                return resolvedTopic;
+            }
+
+            _remoteMediaService = new RemoteMediaService(_mqttBridge, resolvedTopic); // 远程媒体服务
+            _remoteMediaService.RemoteMediaReceived += OnRemoteMediaTaskReceived;
+
+            _ = _remoteMediaService.StartAsync().ContinueWith(task =>
             {
                 if (task.Exception != null)
                 {
-                    var message = task.Exception.GetBaseException().Message;
+                    var message = task.Exception.GetBaseException().Message; // 错误信息
                     AppLogger.Error(task.Exception, $"MQTT 连接失败: {message}");
                 }
                 else
                 {
-                    AppLogger.Info("MQTT 服务启动完成，等待下行消息。");
+                    AppLogger.Info($"远程媒体服务已启动，监听主题: {resolvedTopic}");
                 }
             }, TaskScheduler.Default);
+
+            return resolvedTopic;
         }
 
         /// <summary>
@@ -1345,29 +1387,24 @@ namespace WpfVideoPet
                 _bobaoService.Dispose();
             }
 
-            if (_mqttService != null)
+            if (_remoteMediaService != null)
             {
                 Closed -= OnMainWindowClosed;
+                _remoteMediaService.RemoteMediaReceived -= OnRemoteMediaTaskReceived;
 
-                if (_mqttService != null)
+                try
                 {
-                    _mqttService.RemoteMediaReceived -= OnRemoteMediaTaskReceived;
-
-                    try
-                    {
-                        await _mqttService.DisposeAsync().ConfigureAwait(false);
-                        AppLogger.Info("MQTT 服务已正常释放。");
-                    }
-                    catch (Exception ex)
-                    {
-                        AppLogger.Error(ex, $"释放 MQTT 服务时发生异常: {ex.Message}");
-                    }
+                    await _remoteMediaService.DisposeAsync().ConfigureAwait(false);
+                    AppLogger.Info("MQTT 服务已正常释放。");
                 }
-
-                _httpClient.Dispose();
-                AppLogger.Info("主窗口关闭，HTTP 客户端资源已释放。");
-
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, $"释放 MQTT 服务时发生异常: {ex.Message}");
+                }
             }
+
+            _httpClient.Dispose();
+            AppLogger.Info("主窗口关闭，HTTP 客户端资源已释放。");
 
             if (_mqttBridge != null)
             {
@@ -1382,6 +1419,7 @@ namespace WpfVideoPet
                 }
             }
         }
+
         /// <summary>
         /// 异步启动 PLC 服务，确保初始化日志及时写入并在发生异常时记录错误详情。
         /// 该方法在主窗口构造完成后触发，不会阻塞 UI 线程。

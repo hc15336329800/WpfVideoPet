@@ -35,7 +35,8 @@ namespace WpfVideoPet.service
         /// 初始化远程媒体服务，复用外部提供的 MQTT 桥接实例，并准备 JSON 解析配置。
         /// </summary>
         /// <param name="bridge">用于维持连接的 MQTT 桥接实例。</param>
-        public RemoteMediaService(MqttCoreService bridge)
+        /// <param name="downlinkTopic">期望订阅的下行主题。</param>
+        public RemoteMediaService(MqttCoreService bridge, string? downlinkTopic = null)
         {
             _bridge = bridge ?? throw new ArgumentNullException(nameof(bridge));
             _messageHandler = OnBridgeMessageReceived;
@@ -43,7 +44,7 @@ namespace WpfVideoPet.service
             {
                 PropertyNameCaseInsensitive = true
             };
-            _downlinkTopic = bridge.DownlinkTopic;
+            _downlinkTopic = string.IsNullOrWhiteSpace(downlinkTopic) ? bridge.DownlinkTopic : downlinkTopic.Trim();
         }
 
         //*************************************接收消息*********************************************
@@ -85,7 +86,8 @@ namespace WpfVideoPet.service
         /// </summary>
         public Task SendHelloWorldTo118Async(CancellationToken cancellationToken = default)
         {
-            return SendStringAsync("helloworld", topic: DefaultRemoteMediaTopic, retain: false, cancellationToken);
+            var targetTopic = string.IsNullOrWhiteSpace(_downlinkTopic) ? DefaultRemoteMediaTopic : _downlinkTopic; // 发送目标主题
+            return SendStringAsync("helloworld", topic: targetTopic, retain: false, cancellationToken);
         }
 
 

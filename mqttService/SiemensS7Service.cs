@@ -32,7 +32,7 @@ namespace WpfVideoPet.service
         /// <param name="appConfig">应用配置实例。</param>
         /// <param name="mqttBridge">共享的 MQTT 桥接服务。</param>
         public SiemensS7Service(AppConfig appConfig, MqttCoreService mqttBridge)
-            : this(appConfig?.Plc ?? throw new ArgumentNullException(nameof(appConfig)), mqttBridge)
+            : this(appConfig?.MqttPlc ?? throw new ArgumentNullException(nameof(appConfig)), mqttBridge)
         {
         }
 
