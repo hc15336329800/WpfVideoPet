@@ -205,9 +205,9 @@ namespace WpfVideoPet
                 }
                 else
                 {
-                    _plcSubTestService = new PlcSubTestService(_appConfig, _mqttBridge); // 创建 PLC 服务
+                    //  _plcSubTestService = new PlcSubTestService(_appConfig, _mqttBridge); // 创建 PLC 服务  临时注释
 
-                    _plcService = new SiemensS7Service(_appConfig, _mqttBridge); // 测试订阅
+                    _plcService = new SiemensS7Service(_appConfig.Plc, _mqttBridge); // 测试订阅
 
 
                     _ = StartPlcServiceAsync();
