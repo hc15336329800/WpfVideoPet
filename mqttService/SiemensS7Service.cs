@@ -1,12 +1,9 @@
 ﻿﻿using S7.Net;
 using System;
-using System.Collections.Generic;
- using System.Linq;
 using System.Text;
-using System.Text.Json;
- using System.Threading.Tasks;
 using WpfVideoPet.mqtt;
 using static WpfVideoPet.mqtt.MqttCoreService;
+using System.Threading.Tasks;
 
 namespace WpfVideoPet.service
 {
@@ -364,7 +361,8 @@ namespace WpfVideoPet.service
         }
 
         /// <summary>
-        /// 处理来自 MQTT 控制主题的指令，将 01 字符串转换为字节并写入 PLC DB 块。
+        /// 处理来自 MQTT 控制主题的指令，提取首个置位请求并写入目标 PLC 控制位。
+        /// 仅关注消息中的第一个 '1' 字符，其余位保持原状，满足单点触发的需求。
         /// </summary>
         /// <param name="sender">事件源。</param>
         /// <param name="message">定长消息内容。</param>
@@ -390,27 +388,37 @@ namespace WpfVideoPet.service
             }
             AppLogger.Info($"接收到 PLC 控制原始消息，主题: {message.Topic}, 内容长度: {bitString.Length}, 内容(BIT): {bitString}");
 
-            var sanitizedBits = new List<bool>(); // 解析后的位序列
+            var bitCount = 0; // 控制消息的位总数
+            int? targetBitIndex = null; // 首个需要置位的位索引
             foreach (var ch in bitString)
             {
-                if (ch == '0')
+                if (ch == '0' || ch == '1')
                 {
-                    sanitizedBits.Add(false);
+                    if (ch == '1' && targetBitIndex == null)
+                    {
+                        targetBitIndex = bitCount;
+                    }
+
+                    bitCount++;
+                    continue;
                 }
-                else if (ch == '1')
-                {
-                    sanitizedBits.Add(true);
-                }
-                else if (!char.IsWhiteSpace(ch))
+
+                if (!char.IsWhiteSpace(ch))
                 {
                     AppLogger.Warn($"检测到非法的 PLC 控制位字符: {ch}");
                     return;
                 }
             }
 
-            if (sanitizedBits.Count == 0)
+            if (bitCount == 0)
             {
                 AppLogger.Warn("PLC 控制消息未包含有效位信息，已忽略。");
+                return;
+            }
+
+            if (targetBitIndex == null)
+            {
+                AppLogger.Info("PLC 控制消息未请求置位任何通道，已忽略。");
                 return;
             }
 
@@ -422,37 +430,29 @@ namespace WpfVideoPet.service
             }
 
             var maxBits = area.ByteLength * 8; // 控制区位容量
-            if (sanitizedBits.Count > maxBits)
+            if (targetBitIndex.Value >= maxBits)
             {
-                AppLogger.Warn($"控制位数量超出配置容量，将截断至 {maxBits} 位。");
-                sanitizedBits = sanitizedBits.Take(maxBits).ToList();
+                AppLogger.Warn($"PLC 控制位索引 {targetBitIndex.Value} 超出配置容量 {maxBits}，已忽略。");
+                return;
             }
 
-            if (sanitizedBits.Count < maxBits)
-            {
-                var paddingCount = maxBits - sanitizedBits.Count; // 需要补齐的位数
-                sanitizedBits.AddRange(Enumerable.Repeat(false, paddingCount));
-                AppLogger.Info($"控制位数量不足 {maxBits} 位，已在尾部补齐 {paddingCount} 位 0。");
-            }
-
-            var finalBitString = new string(sanitizedBits.Select(b => b ? '1' : '0').ToArray()); // 用于日志输出的最终位串
-            var controlBuffer = BuildControlBuffer(sanitizedBits, area.ByteLength); // 转换后的控制区字节
-            var hexPayload = BitConverter.ToString(controlBuffer).Replace("-", string.Empty); // 十六进制展示
-
-            AppLogger.Info($"准备写入 PLC 控制区，字节数: {controlBuffer.Length}, 数据(HEX): {hexPayload}, 数据(BIT): {finalBitString}");
+            var selectedIndex = targetBitIndex.Value; // 目标位索引
+            AppLogger.Info($"准备写入 PLC 控制位，DB: {area.DbNumber}, 起始字节: {area.StartByte}, 目标位索引: {selectedIndex}。");
 
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    await WriteControlBytesAsync(controlBuffer, CancellationToken.None).ConfigureAwait(false);
+                    await WriteControlBitAsync(selectedIndex, true, CancellationToken.None).ConfigureAwait(false);
+                    AppLogger.Info($"已写入 PLC 控制位，索引: {selectedIndex}。");
                 }
                 catch (Exception ex)
                 {
-                    AppLogger.Error(ex, "批量写入 PLC 控制位失败。");
+                    AppLogger.Error(ex, $"写入 PLC 控制位 {selectedIndex} 失败。");
                 }
             });
         }
+
         /// <summary>
         /// 将处理后的字节缓冲写入 PLC 控制区 DB 块。
         /// </summary>
@@ -520,42 +520,7 @@ namespace WpfVideoPet.service
             }
         }
 
-        /// <summary>
-        /// 将布尔位集合转换为 PLC 写入所需的字节数组，低位在前按位拼接。
-        /// </summary>
-        /// <param name="bits">已经清理与补齐的布尔位集合。</param>
-        /// <param name="byteLength">目标输出字节长度。</param>
-        /// <returns>与控制区字节长度匹配的缓冲区。</returns>
-        private static byte[] BuildControlBuffer(IReadOnlyList<bool> bits, int byteLength)
-        {
-            if (bits == null)
-            {
-                throw new ArgumentNullException(nameof(bits));
-            }
-
-            if (byteLength <= 0)
-            {
-                return Array.Empty<byte>();
-            }
-
-            var buffer = new byte[byteLength]; // 输出缓冲
-            var maxBits = byteLength * 8; // 最大位数
-
-            for (var i = 0; i < maxBits && i < bits.Count; i++)
-            {
-                if (!bits[i])
-                {
-                    continue;
-                }
-
-                var byteIndex = i / 8; // 目标字节索引
-                var bitOffset = i % 8; // 位偏移
-                buffer[byteIndex] |= (byte)(1 << bitOffset);
-            }
-
-            return buffer;
-        }
-
+ 
 
         /// <summary>
         /// 将配置中的 CPU 字符串解析为枚举。
@@ -628,8 +593,11 @@ namespace WpfVideoPet.service
             }
         }
 
+
+        private const int StatusDataBitLength = 16; // 固定上报的状态位数量
+
         /// <summary>
-        /// 按照固定周期轮询 PLC 状态并通过 MQTT 发布字符串报文。
+        /// 按固定周期轮询 PLC 状态并将整理后的位字符串通过 MQTT 发布，同时保留原始 HEX 日志便于排查。
         /// </summary>
         /// <param name="cancellationToken">用于终止任务的取消标记。</param>
         private async Task RunStatusPollingLoopAsync(CancellationToken cancellationToken)
@@ -641,17 +609,21 @@ namespace WpfVideoPet.service
                 try
                 {
                     var statusBytes = await ReadStatusAreaAsync(cancellationToken).ConfigureAwait(false);
-                    var payload = BuildStatusPayload(statusBytes); // 字符串报文
+                    var payload = BuildStatusPayload(statusBytes); // 状态位字符串
 
-                    if (payload != null)
+                    if (!string.IsNullOrEmpty(payload))
                     {
-                        await _mqttBridge.SendStringAsync(payload, Encoding.UTF8, _config.StatusPublishTopic, false, cancellationToken)
-                            .ConfigureAwait(false);
-                        //AppLogger.Info($"已发布 PLC 状态，字节数: {statusBytes.Length}");
-                        // 新增日志输出，显示十六进制与字符串
-                        var hexString = BitConverter.ToString(Encoding.UTF8.GetBytes(payload)).Replace("-", "");
-                        AppLogger.Info($"已发送 MQTT 消息，主题: {_config.StatusPublishTopic}, 长度: {payload.Length}, 内容(HEX): {hexString}, 内容(STR): {payload}");
-
+                        var topic = _config.StatusPublishTopic; // 发布主题
+                        if (!string.IsNullOrWhiteSpace(topic))
+                        {
+                            await _mqttBridge.SendStringAsync(payload, Encoding.UTF8, topic, false, cancellationToken).ConfigureAwait(false);
+                            var hexString = statusBytes.Length > 0 ? Convert.ToHexString(statusBytes) : string.Empty; // HEX 日志
+                            AppLogger.Info($"已发布 PLC 状态，主题: {topic}, 字节数: {statusBytes.Length}, 内容(HEX): {hexString}, 内容(BIT): {payload}");
+                        }
+                        else
+                        {
+                            AppLogger.Warn("未配置 PLC 状态发布主题，状态消息已跳过。");
+                        }
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -660,7 +632,7 @@ namespace WpfVideoPet.service
                 }
                 catch (ObjectDisposedException ex)
                 {
-                    AppLogger.Warn( "PLC 服务已被释放，状态轮询任务即将退出。"+ex);
+                    AppLogger.Warn($"PLC 服务已被释放，状态轮询任务即将退出。{ex}");
                     break;
                 }
                 catch (Exception ex)
@@ -678,12 +650,12 @@ namespace WpfVideoPet.service
                 }
             }
         }
-        private const int StatusDataBitLength = 16; // PLC 状态位固定长度
+
         /// <summary>
-        /// 将 PLC 状态字节整理为业务所需的位字符串，避免额外的 JSON 封装。
+        /// 将 PLC 状态字节整理为业务期望的位字符串，缺失时自动补零以保证长度一致。
         /// </summary>
         /// <param name="statusBytes">PLC 返回的状态字节。</param>
-        /// <returns>按位编码的字符串，如果无有效数据则返回 null。</returns>
+        /// <returns>整理后的位字符串，若无有效数据则返回 null。</returns>
         private string? BuildStatusPayload(byte[] statusBytes)
         {
             if (statusBytes == null || statusBytes.Length == 0)
@@ -692,10 +664,8 @@ namespace WpfVideoPet.service
                 return null;
             }
 
-            var bitString = ConvertToBitString(statusBytes); // 状态位字符串
-            var normalizedData = NormalizeBitString(bitString, StatusDataBitLength); // 裁剪后的状态位
-
-            return normalizedData;
+            var bitString = ConvertToBitString(statusBytes); // 原始状态位
+            return NormalizeBitString(bitString, StatusDataBitLength); // 补齐长度
         }
 
 
@@ -715,16 +685,15 @@ namespace WpfVideoPet.service
             return builder.ToString();
         }
 
-
         /// <summary>
-        /// 根据指定长度裁剪或填充状态位字符串，确保下行数据满足业务期望。
+        /// 根据指定长度裁剪或补齐状态位字符串，统一 MQTT 下行格式。
         /// </summary>
-        /// <param name="bitString">原始的状态位字符串。</param>
-        /// <param name="requiredLength">期望输出的位数。</param>
+        /// <param name="bitString">原始状态位字符串。</param>
+        /// <param name="requiredLength">期望输出长度。</param>
         /// <returns>满足长度要求的状态位字符串。</returns>
         private static string NormalizeBitString(string bitString, int requiredLength)
         {
-            var safeLength = Math.Max(0, requiredLength); // 期望长度
+            var safeLength = Math.Max(0, requiredLength); // 目标长度
 
             if (string.IsNullOrEmpty(bitString))
             {
@@ -736,7 +705,7 @@ namespace WpfVideoPet.service
                 return bitString.Substring(0, safeLength);
             }
 
-            var paddingLength = safeLength - bitString.Length; // 需要填充的位数
+            var paddingLength = safeLength - bitString.Length; // 需要补足的位数
             return bitString + new string('0', paddingLength);
         }
 

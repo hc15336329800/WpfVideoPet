@@ -271,6 +271,8 @@ namespace WpfVideoPet
                 // 如需首次展示天气的示例数据
                 LoadWeatherMock();
             }));
+
+            _ = StartPlcServiceAsync();
         }
 
         // [修复] 将被截断的“打开文件选择”片段补入到点击事件中，保持原有 PlayFile 调用不变
