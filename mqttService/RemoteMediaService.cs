@@ -19,6 +19,7 @@ namespace WpfVideoPet.service
         private readonly MqttCoreService _bridge; // MQTT 核心桥接
         private readonly EventHandler<MqttBridgeMessage> _messageHandler; // MQTT 消息回调
         private readonly JsonSerializerOptions _jsonOptions; // JSON 解析配置
+        private readonly string _downlinkTopic; // 主通道主题
         public event EventHandler<RemoteMediaReceivedEventArgs>? RemoteMediaReceived; // 解析后的远程媒体任务事件
 
         private bool _started; // 是否已启动
@@ -42,6 +43,7 @@ namespace WpfVideoPet.service
             {
                 PropertyNameCaseInsensitive = true
             };
+            _downlinkTopic = bridge.DownlinkTopic;
         }
 
         //*************************************接收消息*********************************************
@@ -55,6 +57,11 @@ namespace WpfVideoPet.service
         private void OnBridgeMessageReceived(object? sender, MqttBridgeMessage message)
         {
             if (_disposed) return;
+            if (!string.IsNullOrWhiteSpace(_downlinkTopic) &&
+               !string.Equals(message.Topic, _downlinkTopic, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
 
             var payloadText = Encoding.UTF8.GetString(message.Payload.Span); // 消息内容文本
             AppLogger.Info($"收到 MQTT 消息 -> Topic: {message.Topic}, 内容: {payloadText}");

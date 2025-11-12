@@ -141,6 +141,12 @@ namespace WpfVideoPet.mqtt
         /// </summary>
         public event EventHandler<MqttBridgeMessage>? MessageReceived;
 
+
+        /// <summary>
+        /// 获取当前配置的默认下行主题，供业务层按需筛选主通道消息。
+        /// </summary>
+        public string DownlinkTopic => _config.DownlinkTopic; // 下行主题
+
         /// <summary>
         /// 建立连接并订阅默认下行主题，避免重复连接。
         /// </summary>

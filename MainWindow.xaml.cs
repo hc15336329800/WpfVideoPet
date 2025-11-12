@@ -205,10 +205,8 @@ namespace WpfVideoPet
                 }
                 else
                 {
-                    //  _plcSubTestService = new PlcSubTestService(_appConfig, _mqttBridge); // 创建 PLC 服务  临时注释
-
-                    _plcService = new SiemensS7Service(_appConfig.Plc, _mqttBridge); // 测试订阅
-
+                    _plcSubTestService = new PlcSubTestService(_appConfig, _mqttBridge); // PLC 订阅测试服务
+                    //_plcService = new SiemensS7Service(_appConfig.Plc, _mqttBridge); // PLC 主服务  临时注释
 
                     _ = StartPlcServiceAsync();
                 }
@@ -1300,6 +1298,23 @@ namespace WpfVideoPet
                 }
             }
 
+            if (_plcSubTestService != null)
+            {
+                try
+                {
+                    await _plcSubTestService.DisposeAsync().ConfigureAwait(false);
+                    AppLogger.Info("PLC 订阅测试服务已正常释放。");
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, "释放 PLC 订阅测试服务时发生异常。");
+                }
+                finally
+                {
+                    _plcSubTestService = null;
+                }
+            }
+
             if (_bobaoService != null)
             {
                 _bobaoService.InterimResultReceived -= OnBobaoInterimResult;
@@ -1363,15 +1378,18 @@ namespace WpfVideoPet
 
             try
             {
-                AppLogger.Info("_plcSubTestService 订阅测试服务启动流程已完成调度。");
-
-                await _plcSubTestService.StartAsync().ConfigureAwait(false);
-
+                if (_plcSubTestService != null)
+                {
+                    AppLogger.Info("PLC 订阅测试服务启动流程已完成调度。");
+                    await _plcSubTestService.StartAsync().ConfigureAwait(false);
+                }
+                else
+                {
+                    AppLogger.Warn("PLC 订阅测试服务未初始化，跳过附加主题订阅。");
+                }
 
                 await _plcService.StartAsync().ConfigureAwait(false);
                 AppLogger.Info("Siemens S7 服务启动流程已完成调度。");
-
-
             }
             catch (Exception ex)
             {

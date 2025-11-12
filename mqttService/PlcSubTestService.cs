@@ -24,6 +24,7 @@ namespace WpfVideoPet.service
 
         private bool _started;  // 是否已启动
         private bool _disposed; // 是否已释放
+        private bool _topicSubscribed; // 是否已完成主题订阅
 
         // [常量] 默认 PLC 订阅主题
         private const string PlcSubTopic = "lanmao001/plc/sub";
@@ -104,17 +105,23 @@ namespace WpfVideoPet.service
             if (_started) return;
 
             await _bridge.StartAsync(cancellationToken).ConfigureAwait(false);
-            _bridge.MessageReceived += _messageHandler;
+            var handlerAttached = false; // 是否已挂载回调
 
             try
             {
                 await SubscribePlcTopicAsync(cancellationToken).ConfigureAwait(false);
+                _bridge.MessageReceived += _messageHandler;
+                handlerAttached = true;
                 await PublishSelfTestAsync(cancellationToken).ConfigureAwait(false);
                 await AwaitSelfTestAsync(cancellationToken).ConfigureAwait(false);
             }
             catch
             {
                 _bridge.MessageReceived -= _messageHandler;
+                if (handlerAttached)
+                {
+                    _bridge.MessageReceived -= _messageHandler;
+                }
                 throw;
             }
             _started = true;
@@ -144,6 +151,7 @@ namespace WpfVideoPet.service
                 _bridge.MessageReceived -= _messageHandler;
                 _started = false;
             }
+            _topicSubscribed = false;
 
             AppLogger.Info("[PLC-TEST] 已停止并释放资源。");
             _selfTestCompletion.TrySetCanceled();
@@ -193,8 +201,15 @@ namespace WpfVideoPet.service
                 AppLogger.Warn("[PLC-TEST] 控制主题为空，已跳过订阅。");
                 return;
             }
+            if (_topicSubscribed)
+            {
+                AppLogger.Info($"[PLC-TEST] 控制主题已订阅，无需重复处理：{_topic}");
+                return;
+            }
 
             await _bridge.SubscribeAdditionalTopicAsync(_topic, cancellationToken).ConfigureAwait(false);
+            _topicSubscribed = true;
+            AppLogger.Info($"[PLC-TEST] 已向 MQTT 注册附加订阅，主题：{_topic}");
         }
 
         /// <summary>
