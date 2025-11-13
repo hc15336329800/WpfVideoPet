@@ -726,13 +726,43 @@ namespace WpfVideoPet.service
         /// <returns>由 0 和 1 组成的位字符串。</returns>
         private static string ConvertToBitString(byte[] bytes)
         {
-            var builder = new StringBuilder(bytes.Length * 8); // 字符串构造器
-            foreach (var b in bytes)
+            if (bytes == null || bytes.Length == 0)
             {
-                builder.Append(Convert.ToString(b, 2).PadLeft(8, '0'));
+                return string.Empty;
             }
 
-            return builder.ToString();
+            var builder = new StringBuilder(bytes.Length * 8); // 字符串构造器
+            var diagnostic = new StringBuilder(bytes.Length * 28); // 记录每个字节的转换明细，便于排查位序问题
+
+            for (var byteIndex = 0; byteIndex < bytes.Length; byteIndex++)
+            {
+                var currentByte = bytes[byteIndex];
+                var segment = new char[8];
+
+                for (var bitIndex = 0; bitIndex < 8; bitIndex++)
+                {
+                    var bitValue = (currentByte >> bitIndex) & 0x01; // LSB 在左
+                    var bitChar = bitValue == 1 ? '1' : '0';
+                    segment[bitIndex] = bitChar;
+                    builder.Append(bitChar);
+                }
+
+                if (diagnostic.Length > 0)
+                {
+                    diagnostic.Append(' ');
+                }
+
+                diagnostic.Append('[')
+                          .Append(byteIndex)
+                          .Append("] = 0x")
+                          .Append(currentByte.ToString("X2"))
+                          .Append(" -> ")
+                          .Append(segment);
+            }
+
+            var result = builder.ToString();
+            AppLogger.Info($"PLC 状态字节按 LSB→MSB 顺序转换完成，合并位串: {result}，逐字节明细: {diagnostic}。");
+            return result;
         }
 
         /// <summary>
