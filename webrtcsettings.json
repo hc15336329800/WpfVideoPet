@@ -28,7 +28,7 @@
   "mqtt": {
     "_comment": "MQTT 对接配置，可根据后端平台的实际分配进行调整。",
     "enabled": true,
-    "serverUri": "tcp://106.52.194.56:1883",
+    "serverUri": "tcp://60.208.82.254:1883",
     "clientId": "lanmao001", // 上位机唯一标识␊
     "topic": "ts_lanmao001", //默认主题␊
     "username": "admin",

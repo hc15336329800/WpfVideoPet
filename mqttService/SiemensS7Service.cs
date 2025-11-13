@@ -18,7 +18,9 @@ namespace WpfVideoPet.service
         private readonly MqttCoreService _mqttBridge; // MQTT 桥接实例
         private readonly SemaphoreSlim _plcLock = new(1, 1); // PLC 访问锁
         private readonly EventHandler<MqttBridgeMessage> _controlHandler; // 控制消息处理器
-  
+            
+        private const int StatusDataBitLength = 16; // PLC 状态上报固定输出16 位  
+
         private Plc? _plc; // PLC 客户端实例
         private bool _disposed; // 释放标记
         private bool _controlSubscribed; // 控制订阅状态
@@ -132,6 +134,11 @@ namespace WpfVideoPet.service
             {
                 throw new ArgumentNullException(nameof(area));
             }
+            if (!TryValidateArea(area, out var validationError))
+            {
+                // 配置参数不合法时立刻终止调用，避免向 PLC 发送无效请求。
+                throw new ArgumentOutOfRangeException(nameof(area), validationError);
+            }
 
             if (_disposed)
             {
@@ -154,8 +161,19 @@ namespace WpfVideoPet.service
                 }
 
                 return await Task.Run(() =>
-                    _plc.ReadBytes(DataType.DataBlock, area.DbNumber, area.StartByte, area.ByteLength) ?? Array.Empty<byte>(),
-                    cancellationToken).ConfigureAwait(false);
+                {
+                    try
+                    {
+                        return _plc.ReadBytes(DataType.DataBlock, area.DbNumber, area.StartByte, area.ByteLength) ?? Array.Empty<byte>();
+                    }
+                    catch (PlcException ex)
+                    {
+                        // 捕获底层 PLC 异常并加入区域信息，便于定位配置错误或越界问题。
+                        AppLogger.Error(ex,
+                            $"读取 PLC 区域失败，DB={area.DbNumber}, Start={area.StartByte}, Length={area.ByteLength}。");
+                        throw;
+                    }
+                }, cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -512,8 +530,20 @@ namespace WpfVideoPet.service
                     return;
                 }
 
-                await Task.Run(() => _plc.WriteBytes(DataType.DataBlock, area.DbNumber, area.StartByte, normalizedBuffer), cancellationToken)
-                    .ConfigureAwait(false);
+                await Task.Run(() =>
+                {
+                    try
+                    {
+                        _plc.WriteBytes(DataType.DataBlock, area.DbNumber, area.StartByte, normalizedBuffer);
+                    }
+                    catch (PlcException ex)
+                    {
+                        // 写入失败时输出详细区域信息，帮助快速定位越界或地址错误。
+                        AppLogger.Error(ex,
+                            $"写入 PLC 区域失败，DB={area.DbNumber}, Start={area.StartByte}, Length={normalizedBuffer.Length}。");
+                        throw;
+                    }
+                }, cancellationToken).ConfigureAwait(false);
                 var hexPayload = BitConverter.ToString(normalizedBuffer).Replace("-", string.Empty); // 写入数据的十六进制表示
                 AppLogger.Info($"已向 PLC 控制区写入 {normalizedBuffer.Length} 字节，数据(HEX): {hexPayload}");
             }
@@ -555,6 +585,12 @@ namespace WpfVideoPet.service
                 AppLogger.Warn("未配置 PLC 状态区域，后台轮询任务未启动。");
                 return;
             }
+            if (!TryValidateArea(_config.StatusArea, out var validationError))
+            {
+                AppLogger.Error($"PLC 状态区域配置无效，后台轮询任务未启动。原因: {validationError}");
+                return;
+            }
+
 
             if (string.IsNullOrWhiteSpace(_config.StatusPublishTopic))
             {
@@ -597,7 +633,7 @@ namespace WpfVideoPet.service
         }
 
 
-        private const int StatusDataBitLength = 16; // 固定上报的状态位数量
+        //private const int StatusDataBitLength = 16; // 固定上报的状态位数量
 
         /// <summary>
         /// 按固定周期轮询 PLC 状态并将整理后的位字符串通过 MQTT 发布，同时保留原始 HEX 日志便于排查。
@@ -640,7 +676,8 @@ namespace WpfVideoPet.service
                 }
                 catch (Exception ex)
                 {
-                    AppLogger.Error(ex, "PLC 状态轮询过程中发生异常。");
+                    AppLogger.Error(ex,
+                                         $"PLC 状态轮询过程中发生异常，DB={_config.StatusArea?.DbNumber}, Start={_config.StatusArea?.StartByte}, Length={_config.StatusArea?.ByteLength}。");
                 }
 
                 try
@@ -668,8 +705,18 @@ namespace WpfVideoPet.service
             }
 
             var bitString = ConvertToBitString(statusBytes); // 原始状态位
-            return NormalizeBitString(bitString, StatusDataBitLength); // 补齐长度
+            if (bitString.Length < StatusDataBitLength)
+            {
+                AppLogger.Warn($"PLC 状态字节不足，期望 {StatusDataBitLength} 位，实际 {bitString.Length} 位。将自动补齐零位。");
+            }
+            else if (bitString.Length > StatusDataBitLength)
+            {
+                AppLogger.Info($"PLC 状态字节包含 {bitString.Length} 位数据，按照配置裁剪至 {StatusDataBitLength} 位。");
+            }
+
+            return NormalizeBitString(bitString, StatusDataBitLength); // 固定长度补齐/裁剪
         }
+
 
 
         /// <summary>
@@ -710,6 +757,42 @@ namespace WpfVideoPet.service
 
             var paddingLength = safeLength - bitString.Length; // 需要补足的位数
             return bitString + new string('0', paddingLength);
+        }
+
+        /// <summary>
+        /// 检查 PLC 区域配置是否合法，防止发送越界请求导致 PLC 返回错误码。
+        /// </summary>
+        /// <param name="area">待验证的 PLC 区域。</param>
+        /// <param name="error">当验证失败时返回的错误描述。</param>
+        /// <returns>配置有效返回 true，否则为 false。</returns>
+        private static bool TryValidateArea(PlcAreaConfig area, out string error)
+        {
+            if (area.DbNumber < 1)
+            {
+                error = $"DB 编号必须大于 0，当前值为 {area.DbNumber}";
+                return false;
+            }
+
+            if (area.StartByte < 0)
+            {
+                error = $"起始字节不能为负数，当前值为 {area.StartByte}";
+                return false;
+            }
+
+            if (area.ByteLength <= 0)
+            {
+                error = $"字节长度必须大于 0，当前值为 {area.ByteLength}";
+                return false;
+            }
+
+            if (area.StartByte + area.ByteLength > ushort.MaxValue)
+            {
+                error = $"起始字节与长度之和超出 S7 请求允许的最大范围 ({ushort.MaxValue})。";
+                return false;
+            }
+
+            error = string.Empty;
+            return true;
         }
 
     }
