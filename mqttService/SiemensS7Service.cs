@@ -2,6 +2,7 @@
 using System;
 using System.Text;
 using WpfVideoPet.mqtt;
+using System.Text.Json;
 using static WpfVideoPet.mqtt.MqttCoreService;
 using System.Threading.Tasks;
 using System.Collections.Generic;
@@ -416,6 +417,32 @@ namespace WpfVideoPet.service
             }
 
             var maxBits = area.ByteLength * 8; // 控制区位容量
+            if (TryParseSingleDeviceCommand(bitString, out var singleDeviceCommand))
+            {
+                var (deviceCode, powerOn) = singleDeviceCommand.Value;
+                var bitIndex = deviceCode; // 目前设备编码与控制位索引一一对应
+                if (bitIndex < 0 || bitIndex >= maxBits)
+                {
+                    AppLogger.Warn($"单点 PLC 控制位索引越界，指令已忽略。设备编码: {deviceCode}, 合法范围: 0-{maxBits - 1}");
+                    return;
+                }
+
+                AppLogger.Info($"解析到单点 PLC 控制指令，设备编码: {deviceCode}, 目标位: {bitIndex}, 电源状态: {powerOn}");
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await WriteControlBitAsync(bitIndex, powerOn, CancellationToken.None).ConfigureAwait(false);
+                        AppLogger.Info($"单点 PLC 控制指令执行成功，设备编码: {deviceCode}, 位: {bitIndex}, 状态: {powerOn}");
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Error(ex, $"单点 PLC 控制指令执行失败，设备编码: {deviceCode}, 位: {bitIndex}, 状态: {powerOn}");
+                    }
+                });
+                return;
+            }
+
             var parsedBits = new List<bool>(maxBits); // 已解析的控制位集合
             var truncated = false; // 是否出现截断
             foreach (var ch in bitString)
@@ -473,6 +500,67 @@ namespace WpfVideoPet.service
                 }
             });
         }
+
+        /// <summary>
+        /// 尝试将 MQTT 载荷解析为单设备控制指令（JSON 格式）。
+        /// </summary>
+        /// <param name="payload">原始 MQTT 消息文本。</param>
+        /// <param name="command">成功解析时输出的设备编码与目标电源状态。</param>
+        /// <returns>当载荷为单设备控制 JSON 指令时返回 true。</returns>
+        private static bool TryParseSingleDeviceCommand(string payload, out (int DeviceCode, bool PowerOn)? command)
+        {
+            command = null;
+            if (string.IsNullOrWhiteSpace(payload))
+            {
+                return false;
+            }
+
+            var trimmed = payload.Trim();
+            if (!trimmed.StartsWith("{", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                return false; // 明确只处理 JSON 文本，避免对位串产生噪声日志。
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(trimmed);
+                var root = document.RootElement;
+
+                if (!root.TryGetProperty("deviceCode", out var deviceCodeElement) ||
+                    !root.TryGetProperty("powerOn", out var powerOnElement))
+                {
+                    return false; // 非预期 JSON 结构，交由位串逻辑继续处理。
+                }
+
+                if (deviceCodeElement.ValueKind != JsonValueKind.Number)
+                {
+                    return false;
+                }
+
+                var deviceCode = deviceCodeElement.GetInt32();
+                var powerOn = powerOnElement.ValueKind switch
+                {
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    JsonValueKind.String when bool.TryParse(powerOnElement.GetString(), out var parsedBool) => parsedBool,
+                    JsonValueKind.Number => powerOnElement.GetInt32() != 0,
+                    _ => (bool?)null
+                };
+
+                if (powerOn is null)
+                {
+                    return false;
+                }
+
+                command = (deviceCode, powerOn.Value);
+                return true;
+            }
+            catch (JsonException)
+            {
+                return false; // JSON 解析失败时回退到位串逻辑。
+            }
+        }
+
 
         /// <summary>
         /// 将处理后的字节缓冲写入 PLC 控制区 DB 块。
