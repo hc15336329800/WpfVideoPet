@@ -10,6 +10,13 @@ using System.Linq;
 
 namespace WpfVideoPet.service
 {
+
+    //2025-11-14 11：11：50
+    //当前 SiemensS7Service 中的 MQTT 解析逻辑已经支持携带
+    //{ "deviceCode": 2, "powerOn": false }
+    //这样的 JSON 负载来控制指定线圈的闭合/断开（false 表示关闭，true 表示打开）。
+
+
     /// <summary>
     /// 西门子 S7 PLC 访问服务，提供按需的读写接口，并复用通用 MQTT 桥处理控制消息。
     /// </summary>
@@ -398,9 +405,12 @@ namespace WpfVideoPet.service
             if (!string.IsNullOrWhiteSpace(targetTopic) &&
                 !string.Equals(message.Topic, targetTopic, StringComparison.OrdinalIgnoreCase))
             {
+                // 记录已接收但由于主题不匹配而忽略的消息，帮助排查配置错误。
+                AppLogger.Info($"收到 PLC 控制消息但主题不匹配，已忽略。当前主题: {message.Topic}, 期望主题: {targetTopic}");
                 return;
             }
-
+            // 订阅主题消息命中后立即输出日志，确认 MQTT 消息链路正常工作。
+            AppLogger.Info($"接收到 PLC 控制订阅消息，主题: {message.Topic}, 原始负载长度: {message.Payload.Length}");
             var bitString = Encoding.UTF8.GetString(message.Payload.Span).Trim(); // 原始控制字符串
             if (string.IsNullOrWhiteSpace(bitString))
             {
