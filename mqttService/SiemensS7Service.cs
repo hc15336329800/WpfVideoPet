@@ -801,8 +801,8 @@ namespace WpfVideoPet.service
                 AppLogger.Warn("PLC 状态轮询返回空数据。");
                 return null;
             }
+            var bitString = ConvertToBitString(statusBytes, _config.StatusBitsLsbFirst); // 原始状态位
 
-            var bitString = ConvertToBitString(statusBytes); // 原始状态位
             if (bitString.Length < StatusDataBitLength)
             {
                 AppLogger.Warn($"PLC 状态字节不足，期望 {StatusDataBitLength} 位，实际 {bitString.Length} 位。将自动补齐零位。");
@@ -822,7 +822,7 @@ namespace WpfVideoPet.service
         /// </summary>
         /// <param name="bytes">待转换的字节数组。</param>
         /// <returns>由 0 和 1 组成的位字符串。</returns>
-        private static string ConvertToBitString(byte[] bytes)
+        private static string ConvertToBitString(byte[] bytes, bool lsbFirst)
         {
             if (bytes == null || bytes.Length == 0)
             {
@@ -837,13 +837,28 @@ namespace WpfVideoPet.service
                 var currentByte = bytes[byteIndex];
                 var segment = new char[8];
 
-                for (var bitIndex = 0; bitIndex < 8; bitIndex++)
+                if (lsbFirst)
                 {
-                    var bitValue = (currentByte >> bitIndex) & 0x01; // LSB 在左
-                    var bitChar = bitValue == 1 ? '1' : '0';
-                    segment[bitIndex] = bitChar;
-                    builder.Append(bitChar);
+                    // 逐位读取低位→高位，确保最终输出满足“1110010000000000”一类的既有约定。
+                    for (var bitIndex = 0; bitIndex < 8; bitIndex++)
+                    {
+                        var bitValue = (currentByte >> bitIndex) & 0x01;
+                        var bitChar = bitValue == 1 ? '1' : '0';
+                        segment[bitIndex] = bitChar;
+                    }
                 }
+                else
+                {
+                    // 逐位读取高位→低位，满足部分系统对 MSB 在前的读取习惯。
+                    for (var bitIndex = 7; bitIndex >= 0; bitIndex--)
+                    {
+                        var bitValue = (currentByte >> bitIndex) & 0x01;
+                        var bitChar = bitValue == 1 ? '1' : '0';
+                        segment[7 - bitIndex] = bitChar;
+                    }
+                }
+
+                builder.Append(segment);
 
                 if (diagnostic.Length > 0)
                 {
@@ -859,7 +874,8 @@ namespace WpfVideoPet.service
             }
 
             var result = builder.ToString();
-            AppLogger.Info($"PLC 状态字节按 LSB→MSB 顺序转换完成，合并位串: {result}，逐字节明细: {diagnostic}。");
+            var bitOrderLabel = lsbFirst ? "LSB→MSB" : "MSB→LSB";
+            AppLogger.Info($"PLC 状态字节按 {bitOrderLabel} 顺序转换完成，合并位串: {result}，逐字节明细: {diagnostic}。");
             return result;
         }
 

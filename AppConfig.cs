@@ -665,6 +665,12 @@ public sealed class PlcConfig
     public string ControlSubscribeTopic { get; set; }
 
     /// <summary>
+    /// 指示状态位转换时是否按照 LSB→MSB（低位在前）顺序展开。
+    /// 为 true 时输出类似 1110010000000000 的字符串，以保持与既有订阅端一致。
+    /// </summary>
+    public bool StatusBitsLsbFirst { get; set; } = true;
+
+    /// <summary>
     /// 轮询读取的 DB 区域信息。
     /// </summary>
     public PlcAreaConfig StatusArea { get; } = new();
