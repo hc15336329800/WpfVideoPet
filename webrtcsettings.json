@@ -29,7 +29,7 @@
     "_comment": "MQTT 对接配置，可根据后端平台的实际分配进行调整。",
     "enabled": true,
     "serverUri": "tcp://60.208.82.254:1883",
-    "clientId": "lanmao001", // 上位机唯一标识␊
+    "clientId": "LHTDA4B48SY9JA047", // 上位机唯一标识␊
     "topic": "ts_lanmao001", //默认主题␊
     "username": "admin",
     "password": "admin",
@@ -41,7 +41,7 @@
 
   "mqtt_video": {
     "_comment": "订阅的视频主题",
-    "topic": "lanmao001/video/sub" //视频订阅的默认主题␊
+    "topic": "LHTDA4B48SY9JA047" //视频订阅的默认主题␊
   },
 
 
@@ -53,8 +53,8 @@
     "rack": 0,
     "slot": 1,
     "pollingIntervalMilliseconds": 3000,
-    "statusPublishTopic": "lanmao001/plc/pub", //向指定的主题（Topic）推送一条消息。
-    "controlSubscribeTopic": "lanmao001/plc/sub", //订阅题（Topic）读取一条消息。
+    "statusPublishTopic": "LHTDA4B48SY9JA047/plc/pub", //向指定的主题（Topic）推送一条消息。
+    "controlSubscribeTopic": "LHTDA4B48SY9JA047/plc/sub", //订阅题（Topic）读取一条消息。
     "statusArea": {
       "_comment": "轮询读取的 DB 区域。",
       "dbNumber": 200,
