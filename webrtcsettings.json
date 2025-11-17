@@ -18,19 +18,29 @@
 
   "overlayAnimationFrameRate": 30, //设置3D固定帧率
   "_comment_overlayAnimationFrameRate": "覆盖层虚拟人动画的目标帧率（fps），0 表示按系统节奏渲染，可直接调整用于测试渲染流畅度。",
+  "overlayDefaultAnimation": "动画3", // 优先按名称匹配的动画片段
+  "overlayDefaultAnimationIndex": 3,
+  "_comment_overlayDefaultAnimationIndex": "当名称匹配不到时，使用按名称排序后的第 N 个动画作为默认（1 表示第一个）。",
 
   "overlayRender": {
     "_comment": "固定渲染分辨率，宽高默认为 1080x1920，可按需调整以提高清晰度。",
     "width": 1920,
     "height": 1080
   },
+  "overlayPetPlacement": {
+    "_comment": "通过像素偏移和缩放来微调右下角 3D 宠物在屏幕上的位置。 offsetX：正值向右移，负值向左； offsetY：正值向下移，负值向上；scale>1 放大，<1 缩小。cameraVerticalBias：相机垂直向下偏移",
+    "offsetX": 120,
+    "offsetY": -50,
+    "scale": 0.9,
+    "cameraVerticalBias": 0.18
 
+  },
   "mqtt": {
     "_comment": "MQTT 对接配置，可根据后端平台的实际分配进行调整。",
     "enabled": true,
     "serverUri": "tcp://60.208.82.254:1883",
     "clientId": "LHTDA4B48SY9JA047", // 上位机唯一标识␊
-    "topic": "ts_lanmao001", //默认主题␊
+    "topic": "LHTDA4B48SY9JA047", //默认主题␊
     "username": "admin",
     "password": "admin",
     "qos": 1,

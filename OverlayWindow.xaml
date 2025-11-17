@@ -31,15 +31,31 @@
         <!-- 🟥 右下角 3D 模型区域（Core DX11 渲染输出） -->
         <Border HorizontalAlignment="Right"
                 VerticalAlignment="Bottom"
-               Margin="-56,16,16,-66"
-                Background="#00000000">
-            <Grid Width="600" Height="700">
+                Margin="0,0,20,20"
+                Padding="0"
+                Background="#00000000"
+                ClipToBounds="False">
+            <Grid Width="600"
+                  Height="720"
+                  VerticalAlignment="Bottom"
+                  ClipToBounds="False">
                 <Image x:Name="PetImage"
                        Stretch="Uniform"
+                       HorizontalAlignment="Right"
+                       VerticalAlignment="Bottom"
+                       Margin="0"
+                       RenderTransformOrigin="0.5,0.95"
                        Focusable="False"
                        IsHitTestVisible="False"
                        RenderOptions.BitmapScalingMode="HighQuality"
-                       SnapsToDevicePixels="True"/>
+                       SnapsToDevicePixels="True">
+                    <Image.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform x:Name="PetImageScaleTransform" ScaleX="1" ScaleY="1"/>
+                            <TranslateTransform x:Name="PetImageTranslateTransform" X="0" Y="0"/>
+                        </TransformGroup>
+                    </Image.RenderTransform>
+                </Image>
             </Grid>
         </Border>
     </Grid>

@@ -14,7 +14,10 @@ namespace WpfVideoPet
         public string? OperatorToken { get; set; }
         public string PageUrl { get; set; } = "https://localhost";
         public float OverlayAnimationFrameRate { get; set; } = 30f; // 叠加层动画目标帧率（0 表示按系统节奏）
+        public string? OverlayDefaultAnimation { get; set; } // 叠加层默认动画名称（可为空）
+        public int OverlayDefaultAnimationIndex { get; set; } // 叠加层默认动画索引（1 起算，为 0 表示禁用）
         public OverlayRenderConfig OverlayRender { get; } = new(); // 叠加层渲染配置
+        public OverlayPetPlacementConfig OverlayPetPlacement { get; } = new(); // 3D 容器放置配置
 
         public MqttConfig Mqtt { get; } = new();
         public MqttVideoConfig MqttVideo { get; } = new();
@@ -89,9 +92,25 @@ namespace WpfVideoPet
                         var clamped = Math.Clamp((float)frameRateValue, 0f, 120f);
                         config.OverlayAnimationFrameRate = clamped;
                     }
+                    if (root.TryGetProperty("overlayDefaultAnimation", out var defaultAnimationElement))
+                    {
+                        var value = defaultAnimationElement.GetString();
+                        if (!string.IsNullOrWhiteSpace(value))
+                        {
+                            config.OverlayDefaultAnimation = value.Trim();
+                        }
+                    }
+                    if (root.TryGetProperty("overlayDefaultAnimationIndex", out var defaultAnimationIndexElement) && defaultAnimationIndexElement.TryGetInt32(out var defaultAnimationIndexValue))
+                    {
+                        config.OverlayDefaultAnimationIndex = Math.Max(0, defaultAnimationIndexValue);
+                    }
                     if (root.TryGetProperty("overlayRender", out var overlayRenderElement))
                     {
                         ApplyOverlayRenderConfig(overlayRenderElement, config.OverlayRender);
+                    }
+                    if (root.TryGetProperty("overlayPetPlacement", out var overlayPetPlacementElement))
+                    {
+                        ApplyOverlayPetPlacementConfig(overlayPetPlacementElement, config.OverlayPetPlacement);
                     }
                     if (root.TryGetProperty("mqtt", out var mqttElement) && mqttElement.ValueKind == JsonValueKind.Object)
                     {
@@ -383,7 +402,35 @@ namespace WpfVideoPet
                 }
             }
         }
+        /// <summary>
+        /// 解析 3D 容器放置配置（偏移、缩放）。
+        /// </summary>
+        private static void ApplyOverlayPetPlacementConfig(JsonElement element, OverlayPetPlacementConfig target)
+        {
+            if (target == null || element.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
 
+            if (element.TryGetProperty("offsetX", out var offsetXElement) && offsetXElement.TryGetDouble(out var offsetXValue))
+            {
+                target.OffsetX = Math.Clamp(offsetXValue, -2000d, 2000d);
+            }
+
+            if (element.TryGetProperty("offsetY", out var offsetYElement) && offsetYElement.TryGetDouble(out var offsetYValue))
+            {
+                target.OffsetY = Math.Clamp(offsetYValue, -2000d, 2000d);
+            }
+
+            if (element.TryGetProperty("scale", out var scaleElement) && scaleElement.TryGetDouble(out var scaleValue))
+            {
+                target.Scale = Math.Clamp(scaleValue, 0.2d, 4d);
+            }
+            if (element.TryGetProperty("cameraVerticalBias", out var cameraBiasElement) && cameraBiasElement.TryGetDouble(out var cameraBiasValue))
+            {
+                target.CameraVerticalBias = Math.Clamp(cameraBiasValue, -1d, 1d);
+            }
+        }
         /// <summary>
         /// 尝试解析“宽x高”格式的分辨率文本，返回提取到的宽度与高度数值。
         /// </summary>
@@ -531,6 +578,31 @@ public sealed class OverlayRenderConfig
     public int Height { get; set; } = 1920; // 渲染目标高度
 }
 
+/// <summary>
+/// 控制叠加层中 3D 宠物图像的偏移与缩放，便于微调在屏幕上的位置。
+/// </summary>
+public sealed class OverlayPetPlacementConfig
+{
+    /// <summary>
+    /// 相对于默认位置向右（+）或向左（-）的偏移量，单位：像素。
+    /// </summary>
+    public double OffsetX { get; set; }
+
+    /// <summary>
+    /// 相对于默认位置向下（+）或向上（-）的偏移量，单位：像素。
+    /// </summary>
+    public double OffsetY { get; set; }
+
+    /// <summary>
+    /// 缩放倍率，1 表示保持原始尺寸，可用于整体放大/缩小模型视图。
+    /// </summary>
+    public double Scale { get; set; } = 1d;
+
+    /// <summary>
+    /// 垂直视角偏移比例，-1~1 表示沿模型高度向上/向下偏移相机注视点，正值会让角色在画面中更靠下。
+    /// </summary>
+    public double CameraVerticalBias { get; set; }
+}
 public sealed class MqttConfig
 {
     /// <summary>

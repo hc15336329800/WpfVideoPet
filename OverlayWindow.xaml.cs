@@ -67,6 +67,12 @@ namespace WpfVideoPet
         private readonly int _renderTargetHeight; // 3D 渲染目标高度
         private readonly bool _useFixedRenderResolution; // 是否使用固定渲染分辨率
         private bool _hasSyncedFixedResolution; // 固定分辨率同步标记
+        private readonly string? _preferredAnimationName; // 用户配置的默认动画名称
+        private readonly int _preferredAnimationIndex; // 用户配置的默认动画索引（1 起算）
+        private readonly double _petViewportOffsetX; // 3D 容器在界面上的水平偏移（像素）
+        private readonly double _petViewportOffsetY; // 3D 容器在界面上的垂直偏移（像素）
+        private readonly double _petViewportScale; // 3D 容器的缩放倍率
+        private readonly double _petViewportCameraVerticalBias; // 3D 相机垂直偏移比例
 
         /// <summary>
         /// 初始化覆盖层窗口，订阅生命周期事件并准备 Core 渲染环境。
@@ -75,6 +81,7 @@ namespace WpfVideoPet
         {
             InitializeComponent();
             RenderOptions.SetBitmapScalingMode(PetImage, BitmapScalingMode.HighQuality);
+            PetImage.SizeChanged += PetImage_SizeChanged; // 追踪 3D 容器尺寸，方便定位模型遮挡问题
             var configuredRate = config?.OverlayAnimationFrameRate ?? DefaultAnimationFrameRate; // 读取配置中的帧率
             if (configuredRate <= 0f)
             {
@@ -102,11 +109,65 @@ namespace WpfVideoPet
             _animationFrameCount = 0; // 初始化关键帧数量
             _animationFrameDuration = 0d; // 初始化关键帧时长
             _animationSourceFrameRate = 0d; // 初始化原始帧率
+            _preferredAnimationName = string.IsNullOrWhiteSpace(config?.OverlayDefaultAnimation) ? null : config!.OverlayDefaultAnimation.Trim();
+            _preferredAnimationIndex = Math.Max(0, config?.OverlayDefaultAnimationIndex ?? 0);
+            _petViewportOffsetX = config?.OverlayPetPlacement?.OffsetX ?? 0d;
+            _petViewportOffsetY = config?.OverlayPetPlacement?.OffsetY ?? 0d;
+            _petViewportScale = config?.OverlayPetPlacement?.Scale ?? 1d;
+            _petViewportCameraVerticalBias = config?.OverlayPetPlacement?.CameraVerticalBias ?? 0d;
+
+            if (!string.IsNullOrEmpty(_preferredAnimationName))
+            {
+                AppLogger.Info($"OverlayWindow 动画偏好：名称 = {_preferredAnimationName}");
+            }
+            if (_preferredAnimationIndex > 0)
+            {
+                AppLogger.Info($"OverlayWindow 动画偏好：索引 = {_preferredAnimationIndex}");
+            }
+            if (Math.Abs(_petViewportCameraVerticalBias) > double.Epsilon)
+            {
+                AppLogger.Info($"OverlayWindow 3D 相机垂直偏移：bias={_petViewportCameraVerticalBias:F3} (相对高度)");
+            }
+            ApplyPetViewportPlacementOverrides();
             Loaded += OverlayWindow_Loaded; // 窗口加载时初始化渲染
 
             Unloaded += OverlayWindow_Unloaded; // 窗口卸载时清理资源
             var animationMode = _useFixedFrameRate ? $"{_targetAnimationFrameRate:F1}fps" : "CompositionTarget 实时节奏"; // 日志描述
             AppLogger.Info($"OverlayWindow 初始化，动画驱动模式：{animationMode}。");
+        }
+
+        /// <summary>
+        /// 监听右下角 3D 容器的尺寸变化，记录日志以便调试摆放位置与裁剪问题。
+        /// </summary>
+        private void PetImage_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            AppLogger.Info($"PetImage 尺寸更新：实际 {e.NewSize.Width:F0}x{e.NewSize.Height:F0}px，渲染源：{_renderTargetWidth}x{_renderTargetHeight}。");
+        }
+        /// <summary>
+        /// 根据配置应用 3D 图像的平移与缩放补偿，帮助角色贴近右下角且避免头部被遮挡。
+        /// </summary>
+        private void ApplyPetViewportPlacementOverrides()
+        {
+            var translate = PetImageTranslateTransform;
+            var scale = PetImageScaleTransform;
+
+            var clampedOffsetX = Math.Clamp(_petViewportOffsetX, -2000d, 2000d);
+            var clampedOffsetY = Math.Clamp(_petViewportOffsetY, -2000d, 2000d);
+            var clampedScale = _petViewportScale <= 0d ? 1d : Math.Clamp(_petViewportScale, 0.2d, 4d);
+
+            if (translate != null)
+            {
+                translate.X = clampedOffsetX;
+                translate.Y = clampedOffsetY;
+            }
+
+            if (scale != null)
+            {
+                scale.ScaleX = clampedScale;
+                scale.ScaleY = clampedScale;
+            }
+
+            AppLogger.Info($"PetImage 视口补偿：Offset=({clampedOffsetX:F1},{clampedOffsetY:F1})px Scale={clampedScale:F3}");
         }
         /// <summary>
         /// 在窗口句柄创建完成后追加透明与非激活样式，确保覆盖层不抢占焦点。
@@ -178,16 +239,20 @@ namespace WpfVideoPet
                 InitializeAnimationPlayer();
                 _loadedScene?.Root?.UpdateAllTransformMatrix(); //  确保 BoundsWithTransform 是最新的
 
-                //  根据场景包围盒自动对齐相机的垂直中心，避免“看不到头”
+
+                //  根据场景包围盒自动对齐相机的垂直中心，并允许按照配置附加偏移，避免“看不到头”
                 if (_cameraCore != null && TryGetSceneBounds(_loadedScene.Root, out var bb))
                 {
                     var centerY = (bb.Minimum.Y + bb.Maximum.Y) * 0.5f;
+                    var boundsHeight = Math.Max(0.0001f, bb.Maximum.Y - bb.Minimum.Y);
+                    var biasRatio = Math.Clamp(_petViewportCameraVerticalBias, -1d, 1d);
+                    var biasedCenterY = centerY + (float)(boundsHeight * biasRatio);
                     var pos = _cameraCore.Position;
                     var look = _cameraCore.LookDirection;
                     var target = pos + look;
-                    var deltaY = centerY - target.Y;
+                    var deltaY = biasedCenterY - target.Y;
                     _cameraCore.LookDirection = new SDX.Vector3(look.X, look.Y + deltaY, look.Z); // 仅抬/降目标点
-                    AppLogger.Info($"Camera vertical aligned to centerY={centerY:F3} (ΔY={deltaY:F3}).");
+                    AppLogger.Info($"Camera vertical aligned: centerY={centerY:F3} height={boundsHeight:F3} bias={biasRatio:F3} targetY={biasedCenterY:F3} ΔY={deltaY:F3}。");
                 }
             }
             else
@@ -380,12 +445,17 @@ namespace WpfVideoPet
             }
 
             var updaters = _loadedScene.Animations.CreateAnimationUpdaters();
-            foreach (var clip in updaters.Keys)
+            var sortedClips = updaters
+                .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                .ToList(); // 排序后保证索引选择具有确定性
+
+            foreach (var clip in sortedClips)
             {
-                AppLogger.Info($"检测到动画片段：{clip}");
+                AppLogger.Info($"检测到动画片段：{clip.Key}");
             }
 
-            _animationUpdater = updaters.TryGetValue("Idle", out var idle) ? idle : updaters.Values.FirstOrDefault();
+            _animationUpdater = ResolvePreferredAnimation(updaters, sortedClips)
+                                ?? (updaters.TryGetValue("Idle", out var idle) ? idle : sortedClips.FirstOrDefault().Value);
             if (_animationUpdater == null)
             {
                 _isAnimationPlaying = false;
@@ -490,6 +560,43 @@ namespace WpfVideoPet
             }
 
             AppLogger.Info($"动画初始化成功：Name={_animationUpdater.Name} Offset={_animationOffsetSeconds:F3}s Duration={_animationDurationSeconds:F3}s");
+        }
+
+        /// <summary>
+        /// 根据配置优先匹配指定的动画名称或索引。
+        /// </summary>
+        /// <param name="updaters">动画名称与更新器的映射表。</param>
+        /// <param name="sortedClips">按名称排序后的动画列表，用于索引选择。</param>
+        /// <returns>匹配到的动画更新器；若未命中则返回 null。</returns>
+        private IAnimationUpdater? ResolvePreferredAnimation(
+            IReadOnlyDictionary<string, IAnimationUpdater> updaters,
+            IReadOnlyList<KeyValuePair<string, IAnimationUpdater>> sortedClips)
+        {
+            if (!string.IsNullOrEmpty(_preferredAnimationName))
+            {
+                if (updaters.TryGetValue(_preferredAnimationName, out var namedUpdater))
+                {
+                    AppLogger.Info($"按名称命中默认动画：{_preferredAnimationName}");
+                    return namedUpdater;
+                }
+
+                AppLogger.Warn($"未找到名称为 {_preferredAnimationName} 的动画片段，尝试按索引匹配。");
+            }
+
+            if (_preferredAnimationIndex > 0)
+            {
+                var zeroBasedIndex = _preferredAnimationIndex - 1;
+                if (zeroBasedIndex >= 0 && zeroBasedIndex < sortedClips.Count)
+                {
+                    var indexedClip = sortedClips[zeroBasedIndex];
+                    AppLogger.Info($"按索引 {_preferredAnimationIndex} 选择默认动画：{indexedClip.Key}");
+                    return indexedClip.Value;
+                }
+
+                AppLogger.Warn($"动画索引 {_preferredAnimationIndex} 超出范围（有效范围：1-{sortedClips.Count}），将回退至 Idle/首个动画。");
+            }
+
+            return null;
         }
 
         /// <summary>
