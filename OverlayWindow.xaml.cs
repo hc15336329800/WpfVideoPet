@@ -72,6 +72,8 @@ namespace WpfVideoPet
         private readonly int _renderTargetHeight; // 3D 渲染目标高度
         private readonly bool _useFixedRenderResolution; // 是否使用固定渲染分辨率
         private bool _hasSyncedFixedResolution; // 固定分辨率同步标记
+        private bool _hasLoggedTimeUpdate; // 是否已经输出过更新时间的一次性日志
+        private bool _hasLoggedRotationPlaceholder; // 是否已经输出过旋转占位的一次性日志
         private readonly string? _preferredAnimationName; // 用户配置的默认动画名称
         private readonly int _preferredAnimationIndex; // 用户配置的默认动画索引（1 起算）
         private readonly double _petViewportOffsetX; // 3D 容器在界面上的水平偏移（像素）
@@ -1286,7 +1288,11 @@ namespace WpfVideoPet
         public void UpdateTime(string timeText)
         {
             TxtTime.Text = timeText;
-            AppLogger.Info($"更新时间显示：{timeText}");
+            if (!_hasLoggedTimeUpdate)
+            {
+                _hasLoggedTimeUpdate = true;
+                AppLogger.Info($"首次更新时间显示：{timeText}（后续更新静默以避免日志刷屏）");
+            }
         }
 
         /// <summary>
@@ -1294,7 +1300,11 @@ namespace WpfVideoPet
         /// </summary>
         public void UpdatePetRotation(double angle)
         {
-            AppLogger.Info($"调用旋转占位方法，角度：{angle}");
+            if (!_hasLoggedRotationPlaceholder)
+            {
+                _hasLoggedRotationPlaceholder = true;
+                AppLogger.Info($"首次调用旋转占位方法，角度：{angle}（占位逻辑仅提示一次日志）");
+            }
         }
 
         /// <summary>
