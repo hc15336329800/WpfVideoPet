@@ -8,8 +8,13 @@ using HelixToolkit.SharpDX.Core.Model.Scene; // 场景节点
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
@@ -766,7 +771,6 @@ namespace WpfVideoPet
 
                     meshNode.Material = phongMaterial;
                     convertedMeshCount++;
-                    convertedMeshCount++;
                     AppLogger.Info($"Mesh[{meshNode.Name ?? "<未命名>"}] PBR 材质已转换为 Blinn/Phong 管线。");
                 }
                 else
@@ -794,13 +798,67 @@ namespace WpfVideoPet
                 return null;
             }
 
-            if (!File.Exists(modelPath))
+            FileInfo? fileInfo = null;
+            try
+            {
+                fileInfo = new FileInfo(modelPath);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, $"无法读取模型文件信息：{modelPath}");
+                return null;
+            }
+
+            if (fileInfo.Exists == false)
             {
                 AppLogger.Warn($"模型文件不存在：{modelPath}");
                 return null;
             }
 
-            var extension = Path.GetExtension(modelPath); // 模型扩展名
+            AppLogger.Info($"模型文件检测：路径={fileInfo.FullName}，大小={FormatFileSize(fileInfo.Length)}，修改时间={fileInfo.LastWriteTime:yyyy-MM-dd HH:mm:ss}");
+            if (TryGetFirstChinesePathSegment(fileInfo.FullName, out var chineseSegment))
+            {
+                var segmentDisplay = string.IsNullOrEmpty(chineseSegment) ? "<未知>" : chineseSegment;
+                AppLogger.Warn(
+                    $"模型路径包含中文目录或文件名 \"{segmentDisplay}\"，当前随附的 Assimp 原生库在部分系统上无法解析 Unicode 路径，建议改为纯英文路径：{fileInfo.DirectoryName ?? fileInfo.FullName}");
+            }
+            var sha256 = TryComputeSha256(fileInfo.FullName);
+            if (!string.IsNullOrEmpty(sha256))
+            {
+                AppLogger.Info($"模型文件校验：SHA256={sha256}");
+            }
+            else
+            {
+                AppLogger.Warn("模型文件 SHA256 计算失败，可能存在 IO 访问问题。");
+            }
+
+            var glbInspection = InspectGlbStructure(fileInfo.FullName);
+            if (glbInspection != null)
+            {
+                AppLogger.Info(
+                    $"GLB 结构验证：magic={glbInspection.MagicTag} headerValid={glbInspection.HeaderValid} version={glbInspection.Version} declaredLength={glbInspection.DeclaredLength} lengthMatch={glbInspection.IsLengthMatched} chunkCount={glbInspection.ChunkCount} jsonBytes={glbInspection.JsonChunkLength} binBytes={glbInspection.BinaryChunkLength} scenes={glbInspection.SceneCount} nodes={glbInspection.NodeCount} meshes={glbInspection.MeshCount} skins={glbInspection.SkinCount} animations={glbInspection.AnimationCount} defaultScene={glbInspection.DefaultSceneIndex?.ToString() ?? "<未指定>"} rootNodes={glbInspection.DefaultSceneRootCount}。");
+
+                if (glbInspection.SampleNodeNames.Count > 0)
+                {
+                    AppLogger.Info($"GLB 节点示例：{string.Join(", ", glbInspection.SampleNodeNames)}");
+                }
+
+                if (glbInspection.MeshCount == 0)
+                {
+                    AppLogger.Warn("GLB JSON 中未检测到 meshes，模型文件可能仅包含动画或骨骼数据。");
+                }
+            }
+            else
+            {
+                AppLogger.Warn("GLB 结构解析失败，文件可能已损坏或非标准 GLB。");
+            }
+            if (fileInfo.Length <= 0)
+            {
+                AppLogger.Warn("模型文件大小为 0，可能在发布或复制过程中被损坏。");
+                return null;
+            }
+
+            var extension = fileInfo.Extension; // 模型扩展名
             if (!string.Equals(extension, ".glb", StringComparison.OrdinalIgnoreCase))
             {
                 AppLogger.Warn($"当前仅支持 GLB 模型，拒绝加载：{modelPath}");
@@ -821,9 +879,12 @@ namespace WpfVideoPet
                 var scene = importer.Load(modelPath);
                 if (scene?.Root == null)
                 {
-                    AppLogger.Warn("导入的场景为空或缺少根节点。");
+                    AppLogger.Warn($"导入的场景为空或缺少根节点。请检查 GLB 是否包含网格数据，当前文件大小：{FormatFileSize(fileInfo.Length)}。");
                     return null;
                 }
+
+                var meshCount = CountMeshNodes(scene.Root);
+                AppLogger.Info($"GLB 模型加载完成，根节点子项={scene.Root.Items?.Count ?? 0}，网格节点数={meshCount}。");
 
                 return scene;
             }
@@ -832,6 +893,320 @@ namespace WpfVideoPet
                 AppLogger.Error(ex, $"加载模型失败：{modelPath}");
                 return null;
             }
+        }
+
+
+        /// <summary>
+        /// 尝试找出模型路径中第一个包含中文字符的目录片段，方便日志指向具体目录。
+        /// </summary>
+        private static bool TryGetFirstChinesePathSegment(string? fullPath, out string? offendingSegment)
+        {
+            offendingSegment = null;
+            if (string.IsNullOrWhiteSpace(fullPath))
+            {
+                return false;
+            }
+
+            // 统一目录分隔符，避免同时存在 / 与 \ 导致拆分困难。
+            var normalized = fullPath.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+            var segments = normalized.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var segment in segments)
+            {
+                if (ContainsChineseCharacters(segment))
+                {
+                    offendingSegment = segment;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 统计场景树中的网格节点数量，方便定位发布后“空场景”问题。
+        /// </summary>
+        private static int CountMeshNodes(SceneNode? node)
+        {
+            if (node == null)
+            {
+                return 0;
+            }
+
+            var count = node is MeshNode ? 1 : 0;
+            if (node.Items == null || node.Items.Count == 0)
+            {
+                return count;
+            }
+
+            foreach (var child in node.Items)
+            {
+                count += CountMeshNodes(child);
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        /// 计算给定文件的 SHA256 摘要，帮助对比不同机器上的发布资源是否一致。
+        /// </summary>
+        private static string? TryComputeSha256(string path)
+        {
+            try
+            {
+                using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using var sha256 = SHA256.Create();
+                var hashBytes = sha256.ComputeHash(stream);
+                var builder = new StringBuilder(hashBytes.Length * 2);
+                foreach (var b in hashBytes)
+                {
+                    builder.Append(b.ToString("x2", CultureInfo.InvariantCulture));
+                }
+
+                return builder.ToString();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, $"计算 SHA256 失败：{path}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 检测路径中是否包含中文字符，用于提醒用户避免将模型放在不兼容的目录下。
+        /// </summary>
+        private static bool ContainsChineseCharacters(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            foreach (var ch in text)
+            {
+                if (IsChineseCharacter(ch))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 判断单个字符是否处于常见的中日韩统一表意文字区间。
+        /// </summary>
+        private static bool IsChineseCharacter(char ch)
+        {
+            return (ch >= '\u4E00' && ch <= '\u9FFF') // 基本汉字
+                   || (ch >= '\u3400' && ch <= '\u4DBF') // 扩展 A
+                   || (ch >= '\uF900' && ch <= '\uFAFF'); // 兼容汉字
+        }
+
+        /// <summary>
+        /// 解析 GLB 文件头和 JSON Chunk，输出基础结构与节点统计，便于对比 Assimp 导入失败的根因。
+        /// </summary>
+        private static GlbInspectionResult? InspectGlbStructure(string path)
+        {
+            try
+            {
+                using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                if (stream.Length < 12)
+                {
+                    AppLogger.Warn($"GLB 文件长度不足 12 字节，无法读取头信息：{path}");
+                    return null;
+                }
+
+                using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+                var magic = reader.ReadUInt32();
+                var version = reader.ReadUInt32();
+                var declaredLength = reader.ReadUInt32();
+
+                const uint JsonChunkType = 0x4E4F534A; // 'JSON'
+                const uint BinChunkType = 0x004E4942; // 'BIN\0'
+
+                var chunkCount = 0;
+                uint jsonChunkLength = 0;
+                uint binChunkLength = 0;
+                byte[]? jsonChunk = null;
+
+                while (reader.BaseStream.Position + 8 <= reader.BaseStream.Length)
+                {
+                    var chunkLength = reader.ReadUInt32();
+                    var chunkType = reader.ReadUInt32();
+                    chunkCount++;
+
+                    if (chunkLength > reader.BaseStream.Length - reader.BaseStream.Position)
+                    {
+                        AppLogger.Warn($"GLB Chunk 长度异常，chunkType=0x{chunkType:X8} chunkLength={chunkLength}，剩余可读字节={reader.BaseStream.Length - reader.BaseStream.Position}。");
+                        break;
+                    }
+
+                    if (chunkType == JsonChunkType)
+                    {
+                        var data = reader.ReadBytes((int)chunkLength);
+                        if (data.Length < chunkLength)
+                        {
+                            AppLogger.Warn($"读取 GLB JSON Chunk 时遇到 EOF，期望 {chunkLength} 字节，仅得到 {data.Length} 字节。");
+                            break;
+                        }
+
+                        jsonChunk = data;
+                        jsonChunkLength = chunkLength;
+                    }
+                    else
+                    {
+                        reader.BaseStream.Seek(chunkLength, SeekOrigin.Current);
+                        if (chunkType == BinChunkType)
+                        {
+                            binChunkLength = chunkLength;
+                        }
+                    }
+                }
+
+                var sampleNodeNames = new List<string>();
+                var sceneCount = 0;
+                var nodeCount = 0;
+                var meshCount = 0;
+                var skinCount = 0;
+                var animationCount = 0;
+                int? defaultSceneIndex = null;
+                var defaultSceneRootCount = 0;
+
+                if (jsonChunk != null && jsonChunk.Length > 0)
+                {
+                    using var json = JsonDocument.Parse(jsonChunk);
+                    var root = json.RootElement;
+
+                    if (root.TryGetProperty("scenes", out var scenesElement) && scenesElement.ValueKind == JsonValueKind.Array)
+                    {
+                        sceneCount = scenesElement.GetArrayLength();
+                    }
+
+                    if (root.TryGetProperty("scene", out var sceneIndexElement) && sceneIndexElement.ValueKind == JsonValueKind.Number && sceneIndexElement.TryGetInt32(out var index))
+                    {
+                        defaultSceneIndex = index;
+                    }
+
+                    if (defaultSceneIndex.HasValue && root.TryGetProperty("scenes", out scenesElement) && scenesElement.ValueKind == JsonValueKind.Array)
+                    {
+                        var sceneIdx = defaultSceneIndex.Value;
+                        if (sceneIdx >= 0 && sceneIdx < scenesElement.GetArrayLength())
+                        {
+                            var defaultScene = scenesElement[sceneIdx];
+                            if (defaultScene.TryGetProperty("nodes", out var defaultNodes) && defaultNodes.ValueKind == JsonValueKind.Array)
+                            {
+                                defaultSceneRootCount = defaultNodes.GetArrayLength();
+                            }
+                        }
+                    }
+
+                    if (root.TryGetProperty("nodes", out var nodesElement) && nodesElement.ValueKind == JsonValueKind.Array)
+                    {
+                        nodeCount = nodesElement.GetArrayLength();
+                        foreach (var nodeElement in nodesElement.EnumerateArray())
+                        {
+                            if (sampleNodeNames.Count >= 5)
+                            {
+                                break;
+                            }
+
+                            if (nodeElement.TryGetProperty("name", out var nameElement))
+                            {
+                                var nodeName = nameElement.GetString();
+                                if (!string.IsNullOrWhiteSpace(nodeName))
+                                {
+                                    sampleNodeNames.Add(nodeName!);
+                                }
+                            }
+                        }
+                    }
+
+                    if (root.TryGetProperty("meshes", out var meshesElement) && meshesElement.ValueKind == JsonValueKind.Array)
+                    {
+                        meshCount = meshesElement.GetArrayLength();
+                    }
+
+                    if (root.TryGetProperty("skins", out var skinsElement) && skinsElement.ValueKind == JsonValueKind.Array)
+                    {
+                        skinCount = skinsElement.GetArrayLength();
+                    }
+
+                    if (root.TryGetProperty("animations", out var animationsElement) && animationsElement.ValueKind == JsonValueKind.Array)
+                    {
+                        animationCount = animationsElement.GetArrayLength();
+                    }
+                }
+
+                return new GlbInspectionResult
+                {
+                    MagicTag = Encoding.ASCII.GetString(BitConverter.GetBytes(magic)),
+                    Version = version,
+                    DeclaredLength = declaredLength,
+                    ChunkCount = chunkCount,
+                    JsonChunkLength = jsonChunkLength,
+                    BinaryChunkLength = binChunkLength,
+                    SceneCount = sceneCount,
+                    NodeCount = nodeCount,
+                    MeshCount = meshCount,
+                    SkinCount = skinCount,
+                    AnimationCount = animationCount,
+                    DefaultSceneIndex = defaultSceneIndex,
+                    DefaultSceneRootCount = defaultSceneRootCount,
+                    SampleNodeNames = sampleNodeNames,
+                    HeaderValid = magic == 0x46546C67 && version >= 2,
+                    IsLengthMatched = declaredLength == stream.Length
+                };
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, $"解析 GLB 结构失败：{path}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 用于承载 GLB 结构分析结果的内部模型。
+        /// </summary>
+        private sealed class GlbInspectionResult
+        {
+            public required string MagicTag { get; init; }
+            public uint Version { get; init; }
+            public uint DeclaredLength { get; init; }
+            public int ChunkCount { get; init; }
+            public uint JsonChunkLength { get; init; }
+            public uint BinaryChunkLength { get; init; }
+            public int SceneCount { get; init; }
+            public int NodeCount { get; init; }
+            public int MeshCount { get; init; }
+            public int SkinCount { get; init; }
+            public int AnimationCount { get; init; }
+            public int? DefaultSceneIndex { get; init; }
+            public int DefaultSceneRootCount { get; init; }
+            public required IReadOnlyList<string> SampleNodeNames { get; init; }
+            public bool HeaderValid { get; init; }
+            public bool IsLengthMatched { get; init; }
+        }
+
+        /// <summary>
+        /// 将字节长度转换为易读字符串，帮助分析资源发布问题。
+        /// </summary>
+        private static string FormatFileSize(long length)
+        {
+            if (length < 1024)
+            {
+                return $"{length} 字节";
+            }
+
+            var size = length / 1024d;
+            var unit = "KB";
+            if (size >= 1024d)
+            {
+                size /= 1024d;
+                unit = "MB";
+            }
+
+            return $"{size.ToString("F2", CultureInfo.InvariantCulture)} {unit}";
         }
 
         /// <summary>
