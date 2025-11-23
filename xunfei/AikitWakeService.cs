@@ -380,16 +380,16 @@ namespace WpfVideoPet.xunfei
                             WakeKeywordRecognized?.Invoke(this, new WakeKeywordEventArgs(recognizedKeyword, notificationMessage));
                             AppLogger.Info("“蓝猫一号”业务处理完毕，本次唤醒流程结束。");
                             return;
-                        //case "打开视频":
-                        //    AppLogger.Info("触发“打开视频”业务逻辑：准备唤起视频通话窗口。");
-                        //    notificationMessage = "已识别指令“打开视频”，正在为您建立视频通话。";
-                        //    shouldTriggerVideoCall = true;
-                        //    break;
-                        case "退出": //可能之前加锁了  需要解锁
-                            AppLogger.Info("识别到“退出蓝猫”唤醒词，准备通知上层关闭弹窗并终止播报。");
+                        case "打开视频":
+                            AppLogger.Info("触发“打开视频”业务逻辑：准备唤起视频通话窗口。");
+                            notificationMessage = "已识别指令“打开视频”，正在为您建立视频通话。";
+                            shouldTriggerVideoCall = true;
+                            break;
+                        case "蓝猫退出": // 记得在key文件中增加唤醒词
+                            AppLogger.Info("识别到“蓝猫退出”唤醒词，准备通知上层关闭弹窗并终止播报。");
                             notificationMessage = "已收到退出指令，正在关闭语音助手。";
                             WakeKeywordRecognized?.Invoke(this, new WakeKeywordEventArgs(recognizedKeyword, notificationMessage));
-                            AppLogger.Info("已向上层发送退出指令回调，本次唤醒流程结束，不再继续后续逻辑。");
+                            AppLogger.Info("已向上层发送蓝猫退出指令回调，本次唤醒流程结束，不再继续后续逻辑。");
                             return;
                         default:
                             AppLogger.Info($"唤醒词 {recognizedKeyword} 未绑定特定逻辑，执行默认处理。");

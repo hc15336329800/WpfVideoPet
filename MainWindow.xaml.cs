@@ -1529,8 +1529,11 @@ namespace WpfVideoPet
             }
         }
 
+
+        // 语音识别
         private void OnWakeKeywordRecognized(object? sender, WakeKeywordEventArgs e)
         {
+
             if (string.Equals(e.Keyword, "退出蓝猫", StringComparison.Ordinal))
             {
                 var exitLog = "识别到唤醒层的“退出蓝猫”指令，立即执行退出流程，停止播报并关闭弹窗。";
