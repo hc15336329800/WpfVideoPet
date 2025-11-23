@@ -1731,36 +1731,10 @@ namespace WpfVideoPet
             {
                 AppLogger.Info($"语音识别完成，最终文本: {finalText}");
                 StopAiChatInactivityCountdown();
-                if (TryHandleExitVoiceCommand(finalText!))
-                {
-                    return;
-                }
 
+                AppLogger.Info("语音识别进入业务分发环节，退出类指令已在唤醒服务集中处理。");
                 DisplayFinalTranscriptAndMaybeStartAi(finalText!);
             }
-        }
-
-        /// <summary>
-        /// 检测是否用户通过语音发出“退出蓝猫”唤醒词，并在命中时立即关闭弹窗与音频播报。
-        /// </summary>
-        /// <param name="finalText">已经裁剪好的语音识别结果。</param>
-        /// <returns>如果识别到退出指令则返回 true，否则返回 false。</returns>
-        private bool TryHandleExitVoiceCommand(string finalText)
-        {
-            if (string.IsNullOrWhiteSpace(finalText))
-            {
-                return false;
-            }
-
-            // 只在用户明确说出“退出蓝猫”时触发，避免误伤普通对话内容。
-            if (!finalText.Contains("退出蓝猫", StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            PerformExitVoiceCleanup($"检测到语音退出指令（退出蓝猫），识别文本: {finalText}，开始关闭弹窗并终止播报。");
-            return true;
-
         }
        
 
