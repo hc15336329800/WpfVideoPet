@@ -1531,6 +1531,13 @@ namespace WpfVideoPet
 
         private void OnWakeKeywordRecognized(object? sender, WakeKeywordEventArgs e)
         {
+            if (string.Equals(e.Keyword, "退出蓝猫", StringComparison.Ordinal))
+            {
+                var exitLog = "识别到唤醒层的“退出蓝猫”指令，立即执行退出流程，停止播报并关闭弹窗。";
+                PerformExitVoiceCleanup(exitLog);
+                return;
+            }
+
             var isAiKeyword = string.Equals(e.Keyword, "蓝猫一号", StringComparison.Ordinal);
             if (isAiKeyword)
             {
@@ -1734,7 +1741,7 @@ namespace WpfVideoPet
         }
 
         /// <summary>
-        /// 检测是否用户通过语音发出“退出”指令，并在命中时立即关闭弹窗与音频播报。
+        /// 检测是否用户通过语音发出“退出蓝猫”唤醒词，并在命中时立即关闭弹窗与音频播报。
         /// </summary>
         /// <param name="finalText">已经裁剪好的语音识别结果。</param>
         /// <returns>如果识别到退出指令则返回 true，否则返回 false。</returns>
@@ -1745,12 +1752,25 @@ namespace WpfVideoPet
                 return false;
             }
 
-            if (!finalText.Contains("退出", StringComparison.Ordinal))
+            // 只在用户明确说出“退出蓝猫”时触发，避免误伤普通对话内容。
+            if (!finalText.Contains("退出蓝猫", StringComparison.Ordinal))
             {
                 return false;
             }
 
-            AppLogger.Info($"检测到语音退出指令，识别文本: {finalText}，开始关闭弹窗并终止播报。");
+            PerformExitVoiceCleanup($"检测到语音退出指令（退出蓝猫），识别文本: {finalText}，开始关闭弹窗并终止播报。");
+            return true;
+
+        }
+       
+
+        /// <summary>
+        /// 统一处理退出类指令，关闭弹窗并停止 TTS，保证语音/唤醒两侧入口行为一致。
+        /// </summary>
+        /// <param name="logMessage">用于记录的详细日志，帮助排查触发来源。</param>
+        private void PerformExitVoiceCleanup(string logMessage)
+        {
+            AppLogger.Info(logMessage);
 
             ResetAiChatExpectation();
             StopAiChatInactivityCountdown();
@@ -1759,18 +1779,22 @@ namespace WpfVideoPet
             {
                 if (_aiChatWindow != null)
                 {
+                    AppLogger.Info("收到退出指令，立即停止 AI 弹窗的 TTS 播报并关闭窗口。");
                     _aiChatWindow.StopTtsPlaybackAndClose();
                 }
 
+                AppLogger.Info("隐藏语音转写与通知提示，确保界面清理干净。");
                 _overlay?.HideTranscription();
                 _overlay?.HideNotification();
 
+                AppLogger.Info("结束与 AI/播报相关的音频压制，恢复系统音量。");
                 EndAudioDucking(DuckingReasonAiChat);
                 EndAudioDucking(DuckingReasonTts);
             }));
-
-            return true;
         }
+
+
+
         /// <summary>
         /// 在语音识别完成后同步展示最终文本，并在需要时立即启动豆包 AI 的流式回答。
         /// </summary>
