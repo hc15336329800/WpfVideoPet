@@ -1534,9 +1534,11 @@ namespace WpfVideoPet
         private void OnWakeKeywordRecognized(object? sender, WakeKeywordEventArgs e)
         {
 
-            if (string.Equals(e.Keyword, "退出蓝猫", StringComparison.Ordinal))
+            // 兼容“退出蓝猫”与“蓝猫退出”两种表达，保证任意退出口令都能立即清理界面与音频。
+            if (string.Equals(e.Keyword, "退出蓝猫", StringComparison.Ordinal) ||
+                string.Equals(e.Keyword, "蓝猫退出", StringComparison.Ordinal))
             {
-                var exitLog = "识别到唤醒层的“退出蓝猫”指令，立即执行退出流程，停止播报并关闭弹窗。";
+                var exitLog = $"识别到唤醒层的“{e.Keyword}”指令，立即执行退出流程，停止播报并关闭弹窗。";
                 PerformExitVoiceCleanup(exitLog);
                 return;
             }
