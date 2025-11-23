@@ -1989,13 +1989,11 @@ namespace WpfVideoPet
             AppLogger.Info("AI 问答等待状态已重置。");
         }
 
-        /// <summary>
-        /// AI 问答弹窗通知 TTS 播报开始时的回调，压低背景音乐。
-        /// </summary>
         private void OnAiChatWindowTtsPlaybackStarted(object? sender, EventArgs e)
         {
             AppLogger.Info("AI 问答弹窗开始进行 TTS 播报，准备压低背景音乐。");
             BeginAudioDucking(DuckingReasonTts);
+            _overlay?.SwitchAnimationByIndex(1, "TTS 播报开始");
         }
 
         /// <summary>
@@ -2005,7 +2003,9 @@ namespace WpfVideoPet
         {
             AppLogger.Info("AI 问答弹窗完成 TTS 播报，尝试恢复背景音乐音量。");
             EndAudioDucking(DuckingReasonTts);
+            _overlay?.RestoreDefaultAnimation("TTS 播报结束");
         }
+
         /// <summary>
         /// 将语音识别文案同步到界面层，自动切换到 UI 线程。
         /// </summary>

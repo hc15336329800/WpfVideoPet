@@ -51,6 +51,9 @@ namespace WpfVideoPet
         private GroupNode? _sceneRoot; // 场景根节点
         private HelixToolkitScene? _loadedScene; // 导入后的场景
         private IAnimationUpdater? _animationUpdater; // 当前动画更新器
+        private IReadOnlyDictionary<string, IAnimationUpdater>? _animationUpdaters; // 所有可用动画片段
+        private List<KeyValuePair<string, IAnimationUpdater>>? _sortedAnimationClips; // 便于按索引切换的动画列表
+        private string? _defaultAnimationKey; // 默认动画名称，便于外部恢复
         private float _animationOffsetSeconds; // 动画播放起点
         private float _animationDurationSeconds; // 动画循环时长
         private bool _isAnimationPlaying; // 动画是否播放
@@ -456,6 +459,9 @@ namespace WpfVideoPet
                 .OrderBy(pair => pair.Key, StringComparer.Ordinal)
                 .ToList(); // 排序后保证索引选择具有确定性
 
+            _animationUpdaters = updaters;
+            _sortedAnimationClips = sortedClips;
+
             foreach (var clip in sortedClips)
             {
                 AppLogger.Info($"检测到动画片段：{clip.Key}");
@@ -470,16 +476,145 @@ namespace WpfVideoPet
                 return;
             }
 
+            _defaultAnimationKey = _animationUpdater.Name;
+
+            ApplyAnimationUpdater(_animationUpdater, "初始化默认动画");
+        }
+
+        /// <summary>
+        /// 根据配置优先匹配指定的动画名称或索引。
+        /// </summary>
+        /// <param name="updaters">动画名称与更新器的映射表。</param>
+        /// <param name="sortedClips">按名称排序后的动画列表，用于索引选择。</param>
+        /// <returns>匹配到的动画更新器；若未命中则返回 null。</returns>
+        private IAnimationUpdater? ResolvePreferredAnimation(
+            IReadOnlyDictionary<string, IAnimationUpdater> updaters,
+            IReadOnlyList<KeyValuePair<string, IAnimationUpdater>> sortedClips)
+        {
+            if (!string.IsNullOrEmpty(_preferredAnimationName))
+            {
+                if (updaters.TryGetValue(_preferredAnimationName, out var namedUpdater))
+                {
+                    AppLogger.Info($"按名称命中默认动画：{_preferredAnimationName}");
+                    return namedUpdater;
+                }
+
+                AppLogger.Warn($"未找到名称为 {_preferredAnimationName} 的动画片段，尝试按索引匹配。");
+            }
+
+            if (_preferredAnimationIndex > 0)
+            {
+                var zeroBasedIndex = _preferredAnimationIndex - 1;
+                if (zeroBasedIndex >= 0 && zeroBasedIndex < sortedClips.Count)
+                {
+                    var indexedClip = sortedClips[zeroBasedIndex];
+                    AppLogger.Info($"按索引 {_preferredAnimationIndex} 选择默认动画：{indexedClip.Key}");
+                    return indexedClip.Value;
+                }
+
+                AppLogger.Warn($"动画索引 {_preferredAnimationIndex} 超出范围（有效范围：1-{sortedClips.Count}），将回退至 Idle/首个动画。");
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 按索引切换动画，索引从 1 开始；用于外部根据业务状态临时切换模型表现。
+        /// </summary>
+        /// <param name="index">目标动画序号（1 起算，对应排序后的动画列表）。</param>
+        /// <param name="triggerReason">触发原因，用于日志说明。</param>
+        public void SwitchAnimationByIndex(int index, string triggerReason)
+        {
+            if (_sortedAnimationClips == null || _animationUpdaters == null)
+            {
+                AppLogger.Warn($"切换动画失败：动画列表未初始化。触发来源：{triggerReason}");
+                return;
+            }
+
+            if (index <= 0)
+            {
+                AppLogger.Warn($"切换动画失败：索引 {index} 非法，触发来源：{triggerReason}");
+                return;
+            }
+
+            var zeroBasedIndex = index - 1;
+            if (zeroBasedIndex < 0 || zeroBasedIndex >= _sortedAnimationClips.Count)
+            {
+                AppLogger.Warn($"切换动画失败：索引 {index} 超出范围（1-{_sortedAnimationClips.Count}）。触发来源：{triggerReason}");
+                return;
+            }
+
+            var targetClip = _sortedAnimationClips[zeroBasedIndex];
+            if (ReferenceEquals(_animationUpdater, targetClip.Value))
+            {
+                AppLogger.Info($"动画已处于目标状态：{targetClip.Key}，触发来源：{triggerReason}");
+                return;
+            }
+
+            AppLogger.Info($"准备切换动画至索引 {index}（{targetClip.Key}），触发来源：{triggerReason}");
+            ApplyAnimationUpdater(targetClip.Value, $"外部切换：{triggerReason}");
+        }
+
+        /// <summary>
+        /// 恢复初始化时的默认动画，适用于临时动画播放结束后的回退处理。
+        /// </summary>
+        /// <param name="triggerReason">触发原因，用于日志说明。</param>
+        public void RestoreDefaultAnimation(string triggerReason)
+        {
+            if (string.IsNullOrWhiteSpace(_defaultAnimationKey))
+            {
+                AppLogger.Warn($"无法恢复默认动画：未记录默认动画键。触发来源：{triggerReason}");
+                return;
+            }
+
+            if (_animationUpdaters == null || !_animationUpdaters.TryGetValue(_defaultAnimationKey, out var defaultUpdater))
+            {
+                AppLogger.Warn($"无法恢复默认动画：未找到名称 {_defaultAnimationKey} 对应的动画。触发来源：{triggerReason}");
+                return;
+            }
+
+            if (ReferenceEquals(_animationUpdater, defaultUpdater))
+            {
+                AppLogger.Info($"当前已处于默认动画：{_defaultAnimationKey}，触发来源：{triggerReason}");
+                return;
+            }
+
+            AppLogger.Info($"恢复默认动画：{_defaultAnimationKey}，触发来源：{triggerReason}");
+            ApplyAnimationUpdater(defaultUpdater, $"恢复默认动画：{triggerReason}");
+        }
+
+        /// <summary>
+        /// 配置并启用指定的动画更新器，同时重置播放状态与统计信息。
+        /// </summary>
+        /// <param name="updater">目标动画更新器。</param>
+        /// <param name="reason">触发原因，用于日志说明。</param>
+        private void ApplyAnimationUpdater(IAnimationUpdater updater, string reason)
+        {
+            _animationUpdater = updater;
             _animationUpdater.RepeatMode = AnimationRepeatMode.Loop;
             _animationUpdater.Reset();
             _animationStartTicks = Stopwatch.GetTimestamp();
             _isAnimationPlaying = true;
             _lastAnimationFrameIndex = -1;
 
-            _animationOffsetSeconds = _animationUpdater.StartTime;
-            _animationDurationSeconds = Math.Max(0f, _animationUpdater.EndTime - _animationUpdater.StartTime);
+            RecalculateAnimationMetrics(updater);
 
-            if (_animationUpdater is NodeAnimationUpdater nodeUpdater)
+            AppLogger.Info($"动画已切换为：{updater.Name}，触发原因：{reason}，Offset={_animationOffsetSeconds:F3}s Duration={_animationDurationSeconds:F3}s");
+        }
+
+        /// <summary>
+        /// 重新计算动画的时间指标与帧率统计，便于外部切换后保持日志一致性。
+        /// </summary>
+        /// <param name="updater">当前生效的动画更新器。</param>
+        private void RecalculateAnimationMetrics(IAnimationUpdater updater)
+        {
+            _animationOffsetSeconds = updater.StartTime;
+            _animationDurationSeconds = Math.Max(0f, updater.EndTime - updater.StartTime);
+            _animationFrameDuration = 0d;
+            _animationFrameCount = 0;
+            _animationSourceFrameRate = 0d;
+
+            if (updater is NodeAnimationUpdater nodeUpdater)
             {
                 var minTime = float.PositiveInfinity; // 最早关键帧
                 var maxTime = float.NegativeInfinity; // 最晚关键帧
@@ -522,88 +657,27 @@ namespace WpfVideoPet
                     _animationDurationSeconds = Math.Max(0f, nodeUpdater.EndTime - nodeUpdater.StartTime);
                 }
 
-                var playbackMax = _animationOffsetSeconds + _animationDurationSeconds;
+                _animationFrameDuration = _animationDurationSeconds > 0f
+                    ? _animationDurationSeconds / Math.Max(1, uniqueTimes.Count)
+                    : 0d;
 
-                _animationFrameCount = Math.Max(1, uniqueTimes.Count); // 记录唯一关键帧数量
-                if (_animationFrameCount <= 1 && _animationDurationSeconds > 1e-4f)
-                {
-                    _animationFrameCount = Math.Max(2, (int)Math.Round(_animationDurationSeconds * _targetAnimationFrameRate));
-                }
+                _animationFrameCount = uniqueTimes.Count;
 
-                _animationFrameDuration = 0d;
-                if (_animationFrameCount > 1 && _animationDurationSeconds > 1e-4f)
-                {
-                    _animationFrameDuration = _animationDurationSeconds / (_animationFrameCount - 1);
-                }
+                var playbackMax = Math.Max(_animationOffsetSeconds + _animationDurationSeconds, nodeUpdater.EndTime);
 
-                if (_animationFrameDuration <= 1e-6d)
-                {
-                    double lastTime = double.NaN;
-                    foreach (var time in uniqueTimes)
-                    {
-                        if (!double.IsNaN(lastTime))
-                        {
-                            var gap = time - lastTime;
-                            if (gap > 1e-6d && (_animationFrameDuration <= 1e-6d || gap < _animationFrameDuration))
-                            {
-                                _animationFrameDuration = gap;
-                            }
-                        }
-
-                        lastTime = time;
-                    }
-                }
-
-                if (_animationFrameDuration <= 1e-6d)
-                {
-                    _animationFrameDuration = _targetAnimationFrameRate > 1e-4f ? 1.0 / _targetAnimationFrameRate : 1.0 / DefaultAnimationFrameRate;
-                }
-
-                _animationSourceFrameRate = _animationFrameDuration > 1e-6d ? 1.0 / _animationFrameDuration : 0d; // 估算原始帧率
                 var estimatedCycleSeconds = _animationFrameCount > 1 ? _animationFrameDuration * (_animationFrameCount - 1) : 0d; // 源动画单周期时长
                 var targetCycleSeconds = _targetAnimationFrameRate > 1e-4f && _animationFrameCount > 0 ? _animationFrameCount / _targetAnimationFrameRate : 0d; // 目标帧率下单周期时长
+                _animationSourceFrameRate = _animationFrameDuration > 1e-6d ? 1.0 / _animationFrameDuration : 0d; // 估算原始帧率
 
                 AppLogger.Info($"动画关键帧统计：Count={keyframeCount} Unique={_animationFrameCount} Min={_animationOffsetSeconds:F3}s Max={playbackMax:F3}s SrcFPS={_animationSourceFrameRate:F2} Cycle@Src={estimatedCycleSeconds:F3}s Cycle@Target={targetCycleSeconds:F3}s");
             }
-
-            AppLogger.Info($"动画初始化成功：Name={_animationUpdater.Name} Offset={_animationOffsetSeconds:F3}s Duration={_animationDurationSeconds:F3}s");
-        }
-
-        /// <summary>
-        /// 根据配置优先匹配指定的动画名称或索引。
-        /// </summary>
-        /// <param name="updaters">动画名称与更新器的映射表。</param>
-        /// <param name="sortedClips">按名称排序后的动画列表，用于索引选择。</param>
-        /// <returns>匹配到的动画更新器；若未命中则返回 null。</returns>
-        private IAnimationUpdater? ResolvePreferredAnimation(
-            IReadOnlyDictionary<string, IAnimationUpdater> updaters,
-            IReadOnlyList<KeyValuePair<string, IAnimationUpdater>> sortedClips)
-        {
-            if (!string.IsNullOrEmpty(_preferredAnimationName))
+            else
             {
-                if (updaters.TryGetValue(_preferredAnimationName, out var namedUpdater))
-                {
-                    AppLogger.Info($"按名称命中默认动画：{_preferredAnimationName}");
-                    return namedUpdater;
-                }
-
-                AppLogger.Warn($"未找到名称为 {_preferredAnimationName} 的动画片段，尝试按索引匹配。");
+                _animationFrameCount = 1; // 非节点动画兜底设置，避免后续计算除零
+                _animationFrameDuration = _animationDurationSeconds;
+                _animationSourceFrameRate = _animationFrameDuration > 1e-6d ? 1.0 / _animationFrameDuration : 0d;
+                AppLogger.Info($"动画关键帧统计：Count=1 Unique={_animationFrameCount} Min={_animationOffsetSeconds:F3}s Max={_animationOffsetSeconds + _animationDurationSeconds:F3}s SrcFPS={_animationSourceFrameRate:F2}（非节点动画兜底计算）");
             }
-
-            if (_preferredAnimationIndex > 0)
-            {
-                var zeroBasedIndex = _preferredAnimationIndex - 1;
-                if (zeroBasedIndex >= 0 && zeroBasedIndex < sortedClips.Count)
-                {
-                    var indexedClip = sortedClips[zeroBasedIndex];
-                    AppLogger.Info($"按索引 {_preferredAnimationIndex} 选择默认动画：{indexedClip.Key}");
-                    return indexedClip.Value;
-                }
-
-                AppLogger.Warn($"动画索引 {_preferredAnimationIndex} 超出范围（有效范围：1-{sortedClips.Count}），将回退至 Idle/首个动画。");
-            }
-
-            return null;
         }
 
         /// <summary>
