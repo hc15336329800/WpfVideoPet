@@ -83,6 +83,10 @@ namespace WpfVideoPet
         private RemoteMediaService? _remoteMediaService; // PLC 视频服务实例
         private SiemensS7Service? _plcService; // PLC mqtt服务实例
         private PlcSubTestService? _plcSubTestService; // PLC 测试服务实例
+        private readonly WeatherService _weatherService = new(); // 天气服务实例
+        private readonly DispatcherTimer _weatherRefreshTimer; // 天气刷新计时器 30分钟
+        private const string FixedWeatherCity = "内蒙准格尔大陆新区"; // 固定展示的城市
+
 
 
 
@@ -129,13 +133,12 @@ namespace WpfVideoPet
 
             _mediaCacheDirectory = EnsureMediaCacheDirectory(startupDirectory, out var cacheInitWarning);
 
-            var logDirectory = Path.Combine(startupDirectory, "Logs");
-            AppLogger.Initialize(logDirectory);
             AppLogger.Info($"应用启动，媒体缓存目录: {_mediaCacheDirectory}");
             if (!string.IsNullOrWhiteSpace(cacheInitWarning))
             {
                 AppLogger.Warn(cacheInitWarning);
             }
+
 
             Core.Initialize();
 
@@ -187,6 +190,12 @@ namespace WpfVideoPet
                 Interval = AiChatInactivityTimeout
             };
             _aiChatInactivityTimer.Tick += OnAiChatInactivityTimeout;
+
+            _weatherRefreshTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMinutes(30) //30分钟刷新
+            };
+            _weatherRefreshTimer.Tick += async (_, __) => await RefreshWeatherAsync();
 
             AppLogger.Info("已移除 System.Speech 蓝猫一号的 唤醒逻辑，避免与讯飞唤醒功能冲突。");
             InitializeMqttService();
@@ -268,8 +277,9 @@ namespace WpfVideoPet
                 // 显示后更新一次位置与尺寸（你原逻辑已有绑定事件）
                 UpdateOverlayBounds();
 
-                // 如需首次展示天气的示例数据
-                LoadWeatherMock();
+                _overlay.UpdateWeather($"城市: {FixedWeatherCity}", "天气: 正在获取...", "气温: --");
+                _ = RefreshWeatherAsync();
+                _weatherRefreshTimer.Start();
             }));
 
             _ = StartPlcServiceAsync();
@@ -398,10 +408,34 @@ namespace WpfVideoPet
                 _player.Mute = !_player.Mute;
             }
         }
-  
-        private void LoadWeatherMock()
+
+        /// <summary>
+        /// 拉取固定城市的天气信息并更新覆盖层显示，附带核心日志便于排查问题。
+        /// </summary>
+        private async Task RefreshWeatherAsync()
         {
-            _overlay?.UpdateWeather("城市: 示例市", "天气: 多云转晴，西北风3级", "气温: 22℃");
+            try
+            {
+                AppLogger.Info($"开始刷新天气信息，目标城市：{FixedWeatherCity}。");
+                var weatherInfo = await _weatherService.GetWeatherAsync(FixedWeatherCity);
+                if (weatherInfo == null)
+                {
+                    _overlay?.UpdateWeather($"城市: {FixedWeatherCity}", "天气: 获取失败", "气温: --");
+                    AppLogger.Warn($"未能获取到 {FixedWeatherCity} 的天气数据。");
+                    return;
+                }
+
+                var cityText = $"城市: {weatherInfo.City}";
+                var weatherText = $"天气: {weatherInfo.Description}";
+                var tempText = $"气温: {weatherInfo.TemperatureCelsius:F1}℃";
+                _overlay?.UpdateWeather(cityText, weatherText, tempText);
+                AppLogger.Info($"天气刷新完成：{cityText}，{weatherText}，{tempText}。");
+            }
+            catch (Exception ex)
+            {
+                _overlay?.UpdateWeather($"城市: {FixedWeatherCity}", "天气: 更新异常", "气温: --");
+                AppLogger.Error(ex, $"刷新 {FixedWeatherCity} 天气信息失败。");
+            }
         }
 
         protected override void OnClosed(EventArgs e)
@@ -1690,8 +1724,52 @@ namespace WpfVideoPet
             {
                 AppLogger.Info($"语音识别完成，最终文本: {finalText}");
                 StopAiChatInactivityCountdown();
+                if (TryHandleExitVoiceCommand(finalText!))
+                {
+                    return;
+                }
+
                 DisplayFinalTranscriptAndMaybeStartAi(finalText!);
             }
+        }
+
+        /// <summary>
+        /// 检测是否用户通过语音发出“退出”指令，并在命中时立即关闭弹窗与音频播报。
+        /// </summary>
+        /// <param name="finalText">已经裁剪好的语音识别结果。</param>
+        /// <returns>如果识别到退出指令则返回 true，否则返回 false。</returns>
+        private bool TryHandleExitVoiceCommand(string finalText)
+        {
+            if (string.IsNullOrWhiteSpace(finalText))
+            {
+                return false;
+            }
+
+            if (!finalText.Contains("退出", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            AppLogger.Info($"检测到语音退出指令，识别文本: {finalText}，开始关闭弹窗并终止播报。");
+
+            ResetAiChatExpectation();
+            StopAiChatInactivityCountdown();
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_aiChatWindow != null)
+                {
+                    _aiChatWindow.StopTtsPlaybackAndClose();
+                }
+
+                _overlay?.HideTranscription();
+                _overlay?.HideNotification();
+
+                EndAudioDucking(DuckingReasonAiChat);
+                EndAudioDucking(DuckingReasonTts);
+            }));
+
+            return true;
         }
         /// <summary>
         /// 在语音识别完成后同步展示最终文本，并在需要时立即启动豆包 AI 的流式回答。

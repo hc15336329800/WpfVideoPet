@@ -18,6 +18,7 @@ namespace WpfVideoPet.doubao
         private readonly MediaPlayer _ttsPlayer; // 音频播放器
         private bool _ttsInitialized; // TTS初始化标记
         private readonly string _ttsOutputPath; // TTS音频路径
+        private bool _playbackNotified; // 是否已经对外广播过播放完成事件，避免重复通知
 
         /// <summary>
         /// 在 TTS 播放开始时触发，便于外部执行音量压制。
@@ -114,6 +115,37 @@ namespace WpfVideoPet.doubao
             {
                 _autoCloseTimer.Stop();
                 AppLogger.Info("AI 问答弹窗自动关闭计时器已停止。");
+            }
+        }
+        /// <summary>
+        /// 从外部强制终止当前 TTS 播放并关闭弹窗，用于用户发出“退出”指令时的兜底处理。
+        /// </summary>
+        public void StopTtsPlaybackAndClose()
+        {
+            StopAutoCloseCountdown();
+
+            try
+            {
+                _ttsPlayer.Stop();
+                AppLogger.Info("收到强制停止请求，已终止TTS播放。");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, $"停止TTS播放时发生异常: {ex.Message}");
+            }
+
+            // 为了保证外部的音频压制状态及时恢复，这里主动补发播放完成事件。
+            if (!_playbackNotified)
+            {
+                TtsPlaybackCompleted?.Invoke(this, EventArgs.Empty);
+                _playbackNotified = true;
+                AppLogger.Info("已补发TTS播放完成事件以便恢复音量。");
+            }
+
+            if (IsVisible)
+            {
+                AppLogger.Info("强制关闭AI 问答弹窗。");
+                Close();
             }
         }
 
@@ -235,7 +267,7 @@ namespace WpfVideoPet.doubao
             }
 
             var tcs = new TaskCompletionSource<bool>();
-            var playbackNotified = false; // 播放状态通知标记
+            _playbackNotified = false; // 播放状态通知标记
 
             void CleanupHandlers()
             {
@@ -265,7 +297,7 @@ namespace WpfVideoPet.doubao
                 _ttsPlayer.Open(new Uri(_ttsOutputPath));
                 _ttsPlayer.Play();
                 TtsPlaybackStarted?.Invoke(this, EventArgs.Empty);
-                playbackNotified = true;
+                _playbackNotified = true;
                 AppLogger.Info($"开始播放讯飞TTS音频: {_ttsOutputPath}");
                 await tcs.Task;
                 AppLogger.Info("讯飞TTS音频播放完成。");
@@ -273,7 +305,7 @@ namespace WpfVideoPet.doubao
             finally
             {
                 CleanupHandlers();
-                if (playbackNotified)
+                if (_playbackNotified)
                 {
                     TtsPlaybackCompleted?.Invoke(this, EventArgs.Empty);
                     AppLogger.Info("已广播TTS播放完成事件，通知外部恢复音量。");

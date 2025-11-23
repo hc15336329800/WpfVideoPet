@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.Windows;
+using System.IO;
 
 namespace WpfVideoPet
 {
@@ -14,6 +15,18 @@ namespace WpfVideoPet
         /// <param name="e">启动事件参数。</param>
         protected override void OnStartup(StartupEventArgs e)
         {
+            // 先初始化日志目录，确保启动阶段的所有日志都可落盘便于排查。
+            var startupDirectory = AppContext.BaseDirectory;
+            if (string.IsNullOrWhiteSpace(startupDirectory))
+            {
+                startupDirectory = Directory.GetCurrentDirectory();
+            }
+
+            var logDirectory = Path.Combine(startupDirectory, "Logs");
+            AppLogger.Initialize(logDirectory);
+            AppLogger.Info($"应用启动，日志目录: {logDirectory}");
+
+
             var currentProcess = Process.GetCurrentProcess(); // 当前进程信息
             var similarProcesses = Process.GetProcessesByName(currentProcess.ProcessName); // 同名进程列表
             Process? existingInstance = null; // 已存在的旧实例
@@ -90,7 +103,12 @@ namespace WpfVideoPet
 
             if (!AutoStartService.IsEnabled()) // 如果未开启自启
             {
+                AppLogger.Info("未检测到自启配置，尝试重新写入开机自启。");
                 AutoStartService.Enable(); // 设置开机自启
+            }
+            else
+            {
+                AppLogger.Info("已检测到自启配置，无需重复写入。");
             }
         }
     }

@@ -62,7 +62,7 @@
     "ipAddress": "192.168.1.117",
     "rack": 0,
     "slot": 1,
-    "pollingIntervalMilliseconds": 3000,
+    "pollingIntervalMilliseconds": 1500,
     "statusPublishTopic": "LHTDA4B48SY9JA047/plc/pub", //向指定的主题（Topic）推送一条消息。
     "controlSubscribeTopic": "LHTDA4B48SY9JA047/plc/sub", //订阅题（Topic）读取一条消息。
     "statusArea": {
