@@ -7,8 +7,13 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
 		<PlatformTarget>x64</PlatformTarget>
-		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<ApplicationManifest Condition="Exists('app.manifest')">app.manifest</ApplicationManifest>
+		<ApplicationManifest Condition="!Exists('app.manifest')"></ApplicationManifest>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="app.manifest" />
+	</ItemGroup>
 	
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
