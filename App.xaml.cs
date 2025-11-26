@@ -7,6 +7,12 @@ namespace WpfVideoPet
 {
     public partial class App : Application
     {
+        /// <summary>
+        /// 启动阶段捕获的显示信息，用于在屏幕不可用时提供安全回退分辨率。
+        /// </summary>
+        public static DisplaySnapshot StartupDisplaySnapshot { get; private set; } = DisplayEnvironmentService.CaptureSafeSnapshot();
+
+
         // Removed explicit Main() because App.xaml generates an entry point in App.g.cs
 
         /// <summary>
@@ -26,6 +32,8 @@ namespace WpfVideoPet
             AppLogger.Initialize(logDirectory);
             AppLogger.Info($"应用启动，日志目录: {logDirectory}");
 
+            StartupDisplaySnapshot = DisplayEnvironmentService.CaptureSafeSnapshot();
+            AppLogger.Info($"启动分辨率: {StartupDisplaySnapshot.Width}x{StartupDisplaySnapshot.Height} @ {StartupDisplaySnapshot.Dpi} DPI，回退: {StartupDisplaySnapshot.IsFallback}");
 
             var currentProcess = Process.GetCurrentProcess(); // 当前进程信息
             var similarProcesses = Process.GetProcessesByName(currentProcess.ProcessName); // 同名进程列表

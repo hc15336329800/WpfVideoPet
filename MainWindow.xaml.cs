@@ -86,6 +86,8 @@ namespace WpfVideoPet
         private readonly WeatherService _weatherService = new(); // 天气服务实例
         private readonly DispatcherTimer _weatherRefreshTimer; // 天气刷新计时器 30分钟
         private const string FixedWeatherCity = "内蒙准格尔大陆新区"; // 固定展示的城市
+        private readonly DisplayEnvironmentService _displayEnvironmentService; // 显示环境服务
+        private DisplaySnapshot _currentDisplaySnapshot; // 当前显示快照
 
 
 
@@ -96,6 +98,11 @@ namespace WpfVideoPet
         public MainWindow()
         {
             InitializeComponent();
+
+            _displayEnvironmentService = new DisplayEnvironmentService();
+            _currentDisplaySnapshot = App.StartupDisplaySnapshot; // 使用启动时的显示快照
+            ApplyDisplaySnapshot(_currentDisplaySnapshot, true);
+            _displayEnvironmentService.DisplayChanged += OnDisplayEnvironmentChanged;
 
             _doubaoService = new doubao_service_chat();
             AppLogger.Info("豆包知识库服务初始化完成，等待语音问题输入。");
@@ -283,6 +290,50 @@ namespace WpfVideoPet
             }));
 
             _ = StartPlcServiceAsync();
+        }
+
+        /// <summary>
+        /// 监听到显示参数变化时调用，根据最新快照刷新窗口尺寸与布局。
+        /// </summary>
+        private void OnDisplayEnvironmentChanged(object? sender, DisplaySnapshot snapshot)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                _currentDisplaySnapshot = snapshot;
+                AppLogger.Info($"检测到显示变化: {snapshot.Width}x{snapshot.Height} @ {snapshot.Dpi} DPI，回退: {snapshot.IsFallback}");
+                ApplyDisplaySnapshot(snapshot, false);
+            });
+        }
+
+        /// <summary>
+        /// 按照显示快照设置窗口大小、状态并强制刷新布局，避免无分辨率启动导致界面变形。
+        /// </summary>
+        /// <param name="snapshot">最新的显示快照。</param>
+        /// <param name="isInitial">标记是否为启动阶段调用，以便处理安全回退分支。</param>
+        private void ApplyDisplaySnapshot(DisplaySnapshot snapshot, bool isInitial)
+        {
+            if (snapshot.IsFallback && isInitial)
+            {
+                WindowState = WindowState.Normal;
+                Width = snapshot.Width;
+                Height = snapshot.Height;
+                WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            }
+            else
+            {
+                Width = snapshot.Width;
+                Height = snapshot.Height;
+
+                if (WindowState != WindowState.Maximized)
+                {
+                    WindowState = WindowState.Maximized;
+                }
+            }
+
+            InvalidateVisual();
+            UpdateLayout();
+            VideoView.InvalidateVisual();
+            VideoView.UpdateLayout();
         }
 
         // [修复] 将被截断的“打开文件选择”片段补入到点击事件中，保持原有 PlayFile 调用不变
@@ -1375,10 +1426,14 @@ namespace WpfVideoPet
         {
             Closed -= OnMainWindowClosed;
 
+            _displayEnvironmentService.DisplayChanged -= OnDisplayEnvironmentChanged;
+            _displayEnvironmentService.Dispose();
+
             _wakeService.WakeTriggered -= OnWakeTriggered;
             _wakeService.WakeKeywordRecognized -= OnWakeKeywordRecognized;
             _wakeService.SpeechRecognitionRequested -= OnSpeechRecognitionRequested;
             _wakeService.Dispose();
+
 
             if (_plcService != null)
             {
