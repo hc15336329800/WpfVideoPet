@@ -324,6 +324,15 @@ namespace WpfVideoPet
                 _currentDisplaySnapshot = snapshot;
                 AppLogger.Info($"检测到显示变化: {snapshot.Width}x{snapshot.Height} @ {snapshot.Dpi} DPI，回退: {snapshot.IsFallback}");
                 ApplyDisplaySnapshot(snapshot, false);
+                if (_overlay != null)
+                {
+                    // 分辨率恢复后主动刷新叠加层渲染，避免 3D 资源在高分辨率下丢失
+                    _overlay.RefreshRendererForDisplayChange(snapshot);
+                }
+                else
+                {
+                    AppLogger.Warn("显示变化时叠加层尚未初始化，跳过 3D 渲染刷新。");
+                }
             });
         }
 

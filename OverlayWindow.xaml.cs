@@ -486,6 +486,25 @@ namespace WpfVideoPet
         }
 
         /// <summary>
+        /// 当主显示分辨率发生切换（如从 1080p 返回 2K）时，主动重建渲染资源，避免 DX11 设备在高分辨率下丢失输出。
+        /// </summary>
+        /// <param name="snapshot">最新的显示环境快照，用于记录调试信息。</param>
+        public void RefreshRendererForDisplayChange(DisplaySnapshot snapshot)
+        {
+            AppLogger.Info($"收到显示变化刷新请求：{snapshot.Width}x{snapshot.Height} @ {snapshot.Dpi} DPI，准备重建 3D 渲染管线。");
+
+            try
+            {
+                DisposeCoreRenderer();
+                InitializeCoreRenderer();
+                AppLogger.Info("显示变化后重新初始化 3D 渲染成功。");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, "显示变化后重建 3D 渲染失败，3D 模型可能暂时不可见。");
+            }
+        }
+        /// <summary>
         /// 初始化动画播放器，优先选择 Idle 动画并记录播放区间。
         /// </summary>
         private void InitializeAnimationPlayer()
