@@ -204,7 +204,7 @@ namespace WpfVideoPet
             };
             _weatherRefreshTimer.Tick += async (_, __) => await RefreshWeatherAsync();
 
-            AppLogger.Info("已移除 System.Speech 蓝猫一号的 唤醒逻辑，避免与讯飞唤醒功能冲突。");
+            AppLogger.Info("已移除 System.Speech 你好蓝猫的 唤醒逻辑，避免与讯飞唤醒功能冲突。");
             InitializeMqttService();
             _bobaoService = BuildBobaoService(startupDirectory);
             if (_bobaoService == null)
@@ -1598,14 +1598,14 @@ namespace WpfVideoPet
                 return;
             }
 
-            var isAiKeyword = string.Equals(e.Keyword, "蓝猫一号", StringComparison.Ordinal);
+            var isAiKeyword = string.Equals(e.Keyword, "你好蓝猫", StringComparison.Ordinal);
             if (isAiKeyword)
             {
-                AppLogger.Info("识别到“蓝猫一号”唤醒词，准备调度 AI 问答流程。");
+                AppLogger.Info("识别到“你好蓝猫”唤醒词，准备调度 AI 问答流程。");
             }
             else if (_expectAiAnswer)
             {
-                AppLogger.Info("收到非“蓝猫一号”唤醒词，重置 AI 问答等待状态。");
+                AppLogger.Info("收到非“你好蓝猫”唤醒词，重置 AI 问答等待状态。");
             }
 
             _expectAiAnswer = isAiKeyword;
