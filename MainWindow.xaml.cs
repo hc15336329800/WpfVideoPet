@@ -81,6 +81,7 @@ namespace WpfVideoPet
         private const string DuckingReasonTts = "AI_CHAT_TTS"; // TTS 播报压制标识
         private const string DuckingReasonVideoCall = "VIDEO_CALL_WINDOW"; // 视频通话压制标识
         private RemoteMediaService? _remoteMediaService; // PLC 视频服务实例
+        private MqttSoundControlService? _mqttSoundControlService; // MQTT 音量控制服务实例
         private SiemensS7Service? _plcService; // PLC mqtt服务实例
         private PlcSubTestService? _plcSubTestService; // PLC 测试服务实例
         private readonly WeatherService _weatherService = new(); // 天气服务实例
@@ -658,6 +659,21 @@ namespace WpfVideoPet
                 _userPreferredVolume = volume;
             }
         }
+
+        /// <summary>
+        /// 处理 MQTT 下发的音量控制指令，调度到 UI 线程执行音量调整。
+        /// </summary>
+        private void OnMqttSoundVolumeChanged(object? sender, int volume)
+        {
+            AppLogger.Info($"MQTT 音量控制事件触发，目标音量: {volume}。");
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                SetPlayerVolume(volume);
+                AppLogger.Info($"已根据 MQTT 指令更新播放器音量至: {volume}。");
+            }));
+        }
+
         /// <summary>
         /// 启动音量压制逻辑，根据原因标记确保背景音乐被压低。
         /// </summary>
@@ -821,10 +837,15 @@ namespace WpfVideoPet
 
             _mqttBridge ??= new MqttCoreService(_appConfig.Mqtt);
             var resolvedTopic = EnsureRemoteMediaServiceInitialized(); // 实际订阅的主题
+            var soundTopic = EnsureSoundControlService(); // 音量控制主题
 
             if (!string.IsNullOrWhiteSpace(resolvedTopic))
             {
                 AppLogger.Info($"MQTT 服务启动完成，订阅主题: {resolvedTopic}");
+            }
+            if (!string.IsNullOrWhiteSpace(soundTopic))
+            {
+                AppLogger.Info($"MQTT 音量控制监听主题: {soundTopic}");
             }
         }
 
@@ -876,6 +897,49 @@ namespace WpfVideoPet
             }, TaskScheduler.Default);
 
             return resolvedTopic;
+        }
+
+        /// <summary>
+        /// 初始化 MQTT 音量控制服务，订阅配置的音量主题。
+        /// </summary>
+        /// <returns>最终使用的音量控制主题。</returns>
+        private string EnsureSoundControlService()
+        {
+            if (_mqttBridge == null)
+            {
+                AppLogger.Warn("MQTT 桥接未初始化，无法启动音量控制服务。");
+                return string.Empty;
+            }
+
+            var configuredTopic = _appConfig.MqttSound.Topic?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(configuredTopic))
+            {
+                AppLogger.Info("未配置 MQTT 音量控制主题，跳过订阅。");
+                return string.Empty;
+            }
+
+            if (_mqttSoundControlService != null)
+            {
+                return configuredTopic;
+            }
+
+            _mqttSoundControlService = new MqttSoundControlService(_mqttBridge, configuredTopic);
+            _mqttSoundControlService.VolumeChanged += OnMqttSoundVolumeChanged;
+
+            _ = _mqttSoundControlService.StartAsync().ContinueWith(task =>
+            {
+                if (task.Exception != null)
+                {
+                    var message = task.Exception.GetBaseException().Message;
+                    AppLogger.Error(task.Exception, $"启动音量控制服务失败: {message}");
+                }
+                else
+                {
+                    AppLogger.Info($"音量控制服务已就绪，监听主题: {configuredTopic}");
+                }
+            }, TaskScheduler.Default);
+
+            return configuredTopic;
         }
 
         /// <summary>
@@ -1560,6 +1624,20 @@ namespace WpfVideoPet
                 catch (Exception ex)
                 {
                     AppLogger.Error(ex, $"释放 MQTT 服务时发生异常: {ex.Message}");
+                }
+            }
+
+            if (_mqttSoundControlService != null)
+            {
+                _mqttSoundControlService.VolumeChanged -= OnMqttSoundVolumeChanged;
+                try
+                {
+                    await _mqttSoundControlService.DisposeAsync().ConfigureAwait(false);
+                    AppLogger.Info("MQTT 音量控制服务已正常释放。");
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, "释放 MQTT 音量控制服务时发生异常。");
                 }
             }
 
