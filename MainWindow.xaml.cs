@@ -182,7 +182,17 @@ namespace WpfVideoPet
             };
             _petTimer.Start();
 
-            _defaultStartupMediaPath = @"C:\\国旗飘扬.mp4";
+            // 默认启动视频路径：固定放在应用目录下的 videos 子目录，便于随程序一起分发或替换素材
+            const string defaultStartupMediaFileName = "国旗飘扬.mp4";
+            var defaultStartupMediaDirectory = Path.Combine(startupDirectory, "videos");
+            _defaultStartupMediaPath = Path.Combine(defaultStartupMediaDirectory, defaultStartupMediaFileName);
+            AppLogger.Info($"默认启动视频路径已解析：{_defaultStartupMediaPath}");
+            // 输出目录检查日志，便于现场确认目录是否到位（不自动创建，避免误导部署）
+            if (!Directory.Exists(defaultStartupMediaDirectory))
+            {
+                AppLogger.Warn($"默认启动视频目录不存在：{defaultStartupMediaDirectory}，请在该目录放置 {defaultStartupMediaFileName}");
+            }
+
             _petTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
             _petTimer.Tick += (_, __) =>
             {
@@ -373,11 +383,15 @@ namespace WpfVideoPet
             }
 
             _hasScheduledDefaultPlayback = true;
+            AppLogger.Info("已调度默认启动视频播放，将在 5 秒后尝试加载。");
             Dispatcher.InvokeAsync(async () =>
             {
                 try
                 {
+                    AppLogger.Info("默认启动视频等待 5 秒以确保播放器与界面初始化完成……");
                     await Task.Delay(TimeSpan.FromSeconds(5));
+
+                    AppLogger.Info("默认启动视频延时结束，开始检查文件是否存在并尝试播放。");
 
                     if (File.Exists(_defaultStartupMediaPath))
                     {
@@ -385,7 +399,8 @@ namespace WpfVideoPet
                     }
                     else
                     {
-                        AppLogger.Warn($"默认启动视频不存在: {_defaultStartupMediaPath}");
+                        // 提示放置路径：固定在应用目录/videos 下，便于线下环境快速替换素材
+                        AppLogger.Warn($"默认启动视频不存在: {_defaultStartupMediaPath}（请将 {Path.GetFileName(_defaultStartupMediaPath)} 放在应用目录/videos 子目录）");
                     }
                 }
                 catch (Exception ex)
@@ -399,6 +414,7 @@ namespace WpfVideoPet
         {
             if (!File.Exists(path))
             {
+                // 保留明确日志，便于排查默认启动视频缺失或路径配置错误
                 AppLogger.Warn($"尝试播放的本地文件不存在: {path}");
                 return;
             }

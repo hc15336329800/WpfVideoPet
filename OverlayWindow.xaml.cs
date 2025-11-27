@@ -73,7 +73,7 @@ namespace WpfVideoPet
         private int _frameCounter; // 渲染帧计数
         private readonly int _renderTargetWidth; // 3D 渲染目标宽度
         private readonly int _renderTargetHeight; // 3D 渲染目标高度
-        private readonly bool _useFixedRenderResolution; // 是否使用固定渲染分辨率
+        private bool _useFixedRenderResolution; // 是否使用固定渲染分辨率（允许在失败时回退）
         private bool _hasSyncedFixedResolution; // 固定分辨率同步标记
         private bool _hasLoggedTimeUpdate; // 是否已经输出过更新时间的一次性日志
         private bool _hasLoggedRotationPlaceholder; // 是否已经输出过旋转占位的一次性日志
@@ -312,10 +312,26 @@ namespace WpfVideoPet
 
             PetImage.SizeChanged += OnPetImageSizeChanged;
 
-            var width = _useFixedRenderResolution ? Math.Max(1, _renderTargetWidth) : Math.Max(1, (int)Math.Ceiling(PetImage.ActualWidth));
-            var height = _useFixedRenderResolution ? Math.Max(1, _renderTargetHeight) : Math.Max(1, (int)Math.Ceiling(PetImage.ActualHeight));
-            _renderHost.StartD3D(width, height);
-            AppLogger.Info($"StartD3D: {width}x{height} (fixed={_useFixedRenderResolution})");
+            var initialWidth = _useFixedRenderResolution ? Math.Max(1, _renderTargetWidth) : Math.Max(1, (int)Math.Ceiling(PetImage.ActualWidth));
+            var initialHeight = _useFixedRenderResolution ? Math.Max(1, _renderTargetHeight) : Math.Max(1, (int)Math.Ceiling(PetImage.ActualHeight));
+
+            if (!TryStartRenderTarget(initialWidth, initialHeight, _useFixedRenderResolution))
+            {
+                // 若固定分辨率失败，则尝试回退到控件实际尺寸，避免高分辨率导致 Direct3D 初始化异常后 3D 模型消失。
+                AppLogger.Warn($"固定渲染分辨率 {_renderTargetWidth}x{_renderTargetHeight} 初始化失败，准备回退到控件尺寸重试。");
+                var fallbackWidth = Math.Max(1, (int)Math.Ceiling(PetImage.ActualWidth <= 0 ? 1280 : PetImage.ActualWidth));
+                var fallbackHeight = Math.Max(1, (int)Math.Ceiling(PetImage.ActualHeight <= 0 ? 720 : PetImage.ActualHeight));
+
+                _useFixedRenderResolution = false; // 回退到动态分辨率模式
+                _hasSyncedFixedResolution = false; // 重置同步标记，防止后续误判
+
+                if (!TryStartRenderTarget(fallbackWidth, fallbackHeight, false))
+                {
+                    AppLogger.Error("StartD3D 在回退分辨率下仍然失败，3D 渲染将无法显示。");
+                    return;
+                }
+            }
+
             _renderHost.UpdateAndRender();
 
             CompositionTarget.Rendering += OnCompositionRendering;
@@ -327,7 +343,6 @@ namespace WpfVideoPet
             _lastAnimationFrameIndex = -1;
             AppLogger.Info("渲染循环已启动。");
         }
-
         /// <summary>
         /// 在窗口卸载或重新初始化前释放渲染循环与 DX11 资源。
         /// </summary>
@@ -411,6 +426,35 @@ namespace WpfVideoPet
                 AppLogger.Info("DX11ImageSource 已绑定到界面。");
             }
         }
+
+        /// <summary>
+        /// 封装 StartD3D 并捕获异常，便于在高分辨率失败时输出日志并决定是否回退。
+        /// </summary>
+        /// <param name="width">目标渲染宽度。</param>
+        /// <param name="height">目标渲染高度。</param>
+        /// <param name="isFixed">是否处于固定分辨率模式。</param>
+        /// <returns>StartD3D 是否执行成功。</returns>
+        private bool TryStartRenderTarget(int width, int height, bool isFixed)
+        {
+            if (_renderHost == null)
+            {
+                AppLogger.Warn("StartD3D 被跳过：渲染宿主尚未初始化。");
+                return false;
+            }
+
+            try
+            {
+                _renderHost.StartD3D(width, height);
+                AppLogger.Info($"StartD3D: {width}x{height} (fixed={isFixed})");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, $"StartD3D 失败：{width}x{height} (fixed={isFixed})");
+                return false;
+            }
+        }
+
 
         /// <summary>
         /// 当 Image 控件尺寸变化时同步调整渲染宿主后台缓冲大小。
