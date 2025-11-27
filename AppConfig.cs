@@ -21,6 +21,8 @@ namespace WpfVideoPet
 
         public MqttConfig Mqtt { get; } = new();
         public MqttVideoConfig MqttVideo { get; } = new();
+        public MqttSoundConfig MqttSound { get; } = new();
+
 
         public AudioDuckingConfig AudioDucking { get; } = new();
         public WakeConfig Wake { get; } = new();
@@ -188,6 +190,19 @@ namespace WpfVideoPet
                                 if (!string.IsNullOrWhiteSpace(value))
                                 {
                                     video.Topic = value.Trim();
+                                }
+                            }
+                        }
+                        if (root.TryGetProperty("mqtt_sound", out var mqttSoundElement) && mqttSoundElement.ValueKind == JsonValueKind.Object)
+                        {
+                            var sound = config.MqttSound;
+
+                            if (mqttSoundElement.TryGetProperty("topic", out var soundTopicElement))
+                            {
+                                var value = soundTopicElement.GetString();
+                                if (!string.IsNullOrWhiteSpace(value))
+                                {
+                                    sound.Topic = value.Trim();
                                 }
                             }
                         }
@@ -690,6 +705,16 @@ public sealed class MqttVideoConfig
     public string Topic { get; set; } = string.Empty; // 订阅的主题
 }
 
+/// <summary>
+/// 描述音量控制指令的订阅配置，仅需提供单向监听的主题名称。
+/// </summary>
+public sealed class MqttSoundConfig
+{
+    /// <summary>
+    /// MQTT 下行音量控制指令的主题，例如 LHTDA4B48SY9JA047/sound。
+    /// </summary>
+    public string Topic { get; set; } = string.Empty;
+}
 
 /// <summary>
 /// 描述西门子 PLC 的基础配置，包含连接参数、主题与数据区信息。

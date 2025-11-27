@@ -54,6 +54,10 @@
     "topic": "LHTDA4B48SY9JA047" //视频订阅的默认主题␊
   },
 
+  "mqtt_sound": {
+    "_comment": "控制声音大小",
+    "topic": "LHTDA4B48SY9JA047/sound"
+  },
 
   "mqtt_plc": {
     "_comment": "西门子 S7 PLC 参数，包含轮询与控制区配置。",
