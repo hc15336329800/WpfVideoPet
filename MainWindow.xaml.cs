@@ -88,6 +88,9 @@ namespace WpfVideoPet
         private const string FixedWeatherCity = "内蒙准格尔大陆新区"; // 固定展示的城市
         private readonly DisplayEnvironmentService _displayEnvironmentService; // 显示环境服务
         private DisplaySnapshot _currentDisplaySnapshot; // 当前显示快照
+        private readonly string _defaultStartupMediaPath; // 默认启动视频路径
+        private bool _hasScheduledDefaultPlayback; // 是否已安排默认播放
+   
 
 
 
@@ -171,7 +174,15 @@ namespace WpfVideoPet
             _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _clockTimer.Tick += (_, __) => _overlay?.UpdateTime($"时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             _clockTimer.Start();
+            _petTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
+            _petTimer.Tick += (_, __) =>
+            {
+                _angle = (_angle + 1) % 360;
+                _overlay?.UpdatePetRotation(_angle);
+            };
+            _petTimer.Start();
 
+            _defaultStartupMediaPath = @"C:\\国旗飘扬.mp4";
             _petTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
             _petTimer.Tick += (_, __) =>
             {
@@ -290,6 +301,7 @@ namespace WpfVideoPet
             }));
 
             _ = StartPlcServiceAsync();
+            ScheduleDefaultStartupPlayback();
         }
 
         /// <summary>
@@ -350,6 +362,39 @@ namespace WpfVideoPet
             }
         }
 
+        /// <summary>
+        /// 在应用启动后安排默认视频播放，留出初始化缓冲时间避免播放器尚未就绪。
+        /// </summary>
+        private void ScheduleDefaultStartupPlayback()
+        {
+            if (_hasScheduledDefaultPlayback)
+            {
+                return;
+            }
+
+            _hasScheduledDefaultPlayback = true;
+            Dispatcher.InvokeAsync(async () =>
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5));
+
+                    if (File.Exists(_defaultStartupMediaPath))
+                    {
+                        PlayFile(_defaultStartupMediaPath);
+                    }
+                    else
+                    {
+                        AppLogger.Warn($"默认启动视频不存在: {_defaultStartupMediaPath}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Warn($"启动默认视频时发生异常: {ex.Message}");
+                }
+            });
+        }
+
         public void PlayFile(string path)
         {
             if (!File.Exists(path))
@@ -357,7 +402,6 @@ namespace WpfVideoPet
                 AppLogger.Warn($"尝试播放的本地文件不存在: {path}");
                 return;
             }
-
             lock (_playbackStateLock)
             {
                 // 记录当前正在播放的本地文件路径，EndReached 时优先重播该文件
