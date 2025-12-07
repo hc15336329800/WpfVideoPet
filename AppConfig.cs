@@ -22,6 +22,7 @@ namespace WpfVideoPet
         public MqttConfig Mqtt { get; } = new();
         public MqttVideoConfig MqttVideo { get; } = new();
         public MqttSoundConfig MqttSound { get; } = new();
+        public MqttAlarmConfig MqttAlarm { get; } = new();
 
 
         public AudioDuckingConfig AudioDucking { get; } = new();
@@ -204,6 +205,24 @@ namespace WpfVideoPet
                                 {
                                     sound.Topic = value.Trim();
                                 }
+                            }
+                        }
+                        if (root.TryGetProperty("mqtt_alarm", out var mqttAlarmElement) && mqttAlarmElement.ValueKind == JsonValueKind.Object)
+                        {
+                            var alarm = config.MqttAlarm;
+
+                            if (mqttAlarmElement.TryGetProperty("topic", out var alarmTopicElement))
+                            {
+                                var value = alarmTopicElement.GetString();
+                                if (!string.IsNullOrWhiteSpace(value))
+                                {
+                                    alarm.Topic = value.Trim();
+                                }
+                            }
+
+                            if (mqttAlarmElement.TryGetProperty("defaultDurationSeconds", out var durationElement) && durationElement.TryGetInt32(out var durationSeconds))
+                            {
+                                alarm.DefaultDurationSeconds = Math.Max(1, durationSeconds);
                             }
                         }
                         if (root.TryGetProperty("mqtt_plc", out var plcElement) && plcElement.ValueKind == JsonValueKind.Object)
@@ -715,7 +734,21 @@ public sealed class MqttSoundConfig
     /// </summary>
     public string Topic { get; set; } = string.Empty;
 }
+/// <summary>
+/// 描述报警铃声播放的订阅配置，包含主题与默认时长。
+/// </summary>
+public sealed class MqttAlarmConfig
+{
+    /// <summary>
+    /// MQTT 下行报警控制指令的主题。
+    /// </summary>
+    public string Topic { get; set; } = string.Empty;
 
+    /// <summary>
+    /// 当指令未提供时的兜底播放时长（秒）。
+    /// </summary>
+    public int DefaultDurationSeconds { get; set; } = 60;
+}
 /// <summary>
 /// 描述西门子 PLC 的基础配置，包含连接参数、主题与数据区信息。
 /// </summary>

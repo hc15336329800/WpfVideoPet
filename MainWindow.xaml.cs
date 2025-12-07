@@ -82,6 +82,7 @@ namespace WpfVideoPet
         private const string DuckingReasonVideoCall = "VIDEO_CALL_WINDOW"; // 视频通话压制标识
         private RemoteMediaService? _remoteMediaService; // PLC 视频服务实例
         private MqttSoundControlService? _mqttSoundControlService; // MQTT 音量控制服务实例
+        private MqttAlarmLoopService? _mqttAlarmLoopService; // MQTT 报警播放服务实例
         private SiemensS7Service? _plcService; // PLC mqtt服务实例
         private PlcSubTestService? _plcSubTestService; // PLC 测试服务实例
         private readonly WeatherService _weatherService = new(); // 天气服务实例
@@ -91,7 +92,9 @@ namespace WpfVideoPet
         private DisplaySnapshot _currentDisplaySnapshot; // 当前显示快照
         private readonly string _defaultStartupMediaPath; // 默认启动视频路径
         private bool _hasScheduledDefaultPlayback; // 是否已安排默认播放
-   
+        private readonly object _alarmPlaybackLock = new(); // 报警播放同步锁
+        private CancellationTokenSource? _alarmPlaybackCts; // 报警播放取消源
+
 
 
 
@@ -479,6 +482,91 @@ namespace WpfVideoPet
 
         private void BtnStop_Click(object sender, RoutedEventArgs e) => _player.Stop();
 
+        /// <summary>
+        /// 启动报警铃声循环播放，并在指定时长后自动停止。
+        /// </summary>
+        /// <param name="duration">目标播放时长。</param>
+        private void StartAlarmLoop(TimeSpan duration)
+        {
+            if (duration <= TimeSpan.Zero)
+            {
+                AppLogger.Warn($"收到非正向的报警时长: {duration}，忽略播放请求。");
+                return;
+            }
+
+            var alarmPath = ResolveAlarmMediaPath();
+            if (string.IsNullOrWhiteSpace(alarmPath) || !File.Exists(alarmPath))
+            {
+                AppLogger.Warn($"报警铃声文件不存在或路径无效: {alarmPath}");
+                return;
+            }
+
+            CancellationTokenSource? ctsToCancel;
+            lock (_alarmPlaybackLock)
+            {
+                ctsToCancel = _alarmPlaybackCts;
+                _alarmPlaybackCts = new CancellationTokenSource();
+            }
+
+            ctsToCancel?.Cancel();
+            ctsToCancel?.Dispose();
+
+            AppLogger.Info($"开始报警循环播放，文件: {alarmPath}，目标时长: {duration}。");
+
+            // 使用现有播放管线，保持循环直到主动停止。
+            _player.Repeat = true;
+            PlayFile(alarmPath);
+
+            var currentCts = _alarmPlaybackCts;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(duration, currentCts!.Token).ConfigureAwait(false);
+                }
+                catch (TaskCanceledException)
+                {
+                    AppLogger.Info("报警播放等待被取消，可能收到新的指令或手动停止。");
+                    return;
+                }
+
+                await Dispatcher.InvokeAsync(() => StopAlarmLoop("播放时长到期"));
+            });
+        }
+
+        /// <summary>
+        /// 主动停止报警循环播放，重置循环标记并释放定时任务。
+        /// </summary>
+        /// <param name="reason">停止原因。</param>
+        private void StopAlarmLoop(string reason)
+        {
+            CancellationTokenSource? currentCts;
+            lock (_alarmPlaybackLock)
+            {
+                currentCts = _alarmPlaybackCts;
+                _alarmPlaybackCts = null;
+            }
+
+            currentCts?.Cancel();
+            currentCts?.Dispose();
+
+            _player.Repeat = false;
+            _player.Stop();
+
+            AppLogger.Info($"报警播放已停止，原因: {reason}");
+        }
+
+        /// <summary>
+        /// 解析报警铃声文件路径，默认放在应用目录 videos/jingbao.mp3 下。
+        /// </summary>
+        private string ResolveAlarmMediaPath()
+        {
+            var baseDirectory = AppContext.BaseDirectory;
+            var alarmDirectory = Path.Combine(baseDirectory, "videos");
+            var alarmFile = Path.Combine(alarmDirectory, "jingbao.mp3");
+            return alarmFile;
+        }
+
         private void SldVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (_suppressSliderCallback)
@@ -675,6 +763,24 @@ namespace WpfVideoPet
         }
 
         /// <summary>
+        /// 处理 MQTT 下发的报警播放指令，进入循环播放并在时长到期后自动停止。
+        /// </summary>
+        private void OnMqttAlarmRequested(object? sender, AlarmPlaybackRequest request)
+        {
+            AppLogger.Info($"MQTT 报警指令触发，期望播放时长: {request.Duration}，原始载荷: {request.RawPayload}");
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var targetDuration = request.Duration > TimeSpan.Zero
+                    ? request.Duration
+                    : TimeSpan.FromSeconds(_appConfig.MqttAlarm.DefaultDurationSeconds);
+
+                StartAlarmLoop(targetDuration);
+            }));
+        }
+
+
+        /// <summary>
         /// 启动音量压制逻辑，根据原因标记确保背景音乐被压低。
         /// </summary>
         /// <param name="reason">触发压制的原因标识。</param>
@@ -838,6 +944,7 @@ namespace WpfVideoPet
             _mqttBridge ??= new MqttCoreService(_appConfig.Mqtt);
             var resolvedTopic = EnsureRemoteMediaServiceInitialized(); // 实际订阅的主题
             var soundTopic = EnsureSoundControlService(); // 音量控制主题
+            var alarmTopic = EnsureAlarmLoopService(); // 报警循环播放主题
 
             if (!string.IsNullOrWhiteSpace(resolvedTopic))
             {
@@ -846,6 +953,10 @@ namespace WpfVideoPet
             if (!string.IsNullOrWhiteSpace(soundTopic))
             {
                 AppLogger.Info($"MQTT 音量控制监听主题: {soundTopic}");
+            }
+            if (!string.IsNullOrWhiteSpace(alarmTopic))
+            {
+                AppLogger.Info($"MQTT 报警播放监听主题: {alarmTopic}");
             }
         }
 
@@ -936,6 +1047,49 @@ namespace WpfVideoPet
                 else
                 {
                     AppLogger.Info($"音量控制服务已就绪，监听主题: {configuredTopic}");
+                }
+            }, TaskScheduler.Default);
+
+            return configuredTopic;
+        }
+
+        /// <summary>
+        /// 初始化 MQTT 报警播放服务，订阅配置的报警主题。
+        /// </summary>
+        /// <returns>最终使用的报警控制主题。</returns>
+        private string EnsureAlarmLoopService()
+        {
+            if (_mqttBridge == null)
+            {
+                AppLogger.Warn("MQTT 桥接未初始化，无法启动报警播放服务。");
+                return string.Empty;
+            }
+
+            var configuredTopic = _appConfig.MqttAlarm.Topic?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(configuredTopic))
+            {
+                AppLogger.Info("未配置 MQTT 报警播放主题，跳过订阅。");
+                return string.Empty;
+            }
+
+            if (_mqttAlarmLoopService != null)
+            {
+                return configuredTopic;
+            }
+
+            _mqttAlarmLoopService = new MqttAlarmLoopService(_mqttBridge, configuredTopic);
+            _mqttAlarmLoopService.AlarmRequested += OnMqttAlarmRequested;
+
+            _ = _mqttAlarmLoopService.StartAsync().ContinueWith(task =>
+            {
+                if (task.Exception != null)
+                {
+                    var message = task.Exception.GetBaseException().Message;
+                    AppLogger.Error(task.Exception, $"启动报警播放服务失败: {message}");
+                }
+                else
+                {
+                    AppLogger.Info($"报警播放服务已就绪，监听主题: {configuredTopic}");
                 }
             }, TaskScheduler.Default);
 
@@ -1638,6 +1792,22 @@ namespace WpfVideoPet
                 catch (Exception ex)
                 {
                     AppLogger.Error(ex, "释放 MQTT 音量控制服务时发生异常。");
+                }
+            }
+
+            if (_mqttAlarmLoopService != null)
+            {
+                _mqttAlarmLoopService.AlarmRequested -= OnMqttAlarmRequested;
+                StopAlarmLoop("窗口关闭");
+
+                try
+                {
+                    await _mqttAlarmLoopService.DisposeAsync().ConfigureAwait(false);
+                    AppLogger.Info("MQTT 报警播放服务已正常释放。");
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error(ex, "释放 MQTT 报警播放服务时发生异常。");
                 }
             }
 
