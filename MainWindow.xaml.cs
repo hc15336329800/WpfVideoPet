@@ -96,6 +96,9 @@ namespace WpfVideoPet
         private readonly object _alarmPlaybackLock = new(); // 报警播放同步锁
         private CancellationTokenSource? _alarmPlaybackCts; // 报警播放取消源
         private LibVLCSharp.Shared.MediaPlayer? _alarmPlayer; // 独立的报警播放器，避免打断主视频
+        private LibVLC? _alarmLibVlc; // 报警播放器专用 LibVLC 实例，防止音量状态共享   //目前没有成功，改用了暂停视频播放。
+        private int _alarmTargetVolume; // 最近一次报警播放期望的音量，便于回调中保持一致
+        private bool _mainVideoPausedByAlarm; // 记录报警是否主动暂停过主视频，便于结束后恢复
 
 
 
@@ -514,13 +517,26 @@ namespace WpfVideoPet
             ctsToCancel?.Cancel();
             ctsToCancel?.Dispose();
 
-            AppLogger.Info($"开始报警循环播放，文件: {alarmPath}，目标时长: {duration}。降低主视频音量但不打断播放。");
+            // 记录当前音量，用于报警播放时使用原始用户偏好，避免被压制后的低音量覆盖。
+            var preferredAlarmVolume = _userPreferredVolume;
+            AppLogger.Info($"开始报警循环播放，文件: {alarmPath}，目标时长: {duration}，用户偏好音量: {preferredAlarmVolume}。报警期间将暂停主视频，结束后恢复。");
 
-            // 启动报警前降低主视频音量，确保提示音不被视频淹没且保持连续播放。
-            BeginAudioDucking(DuckingReasonAlarm);
+            // 报警期间暂停主视频，避免出现与报警等音量的叠加，同时记录是否由报警主动暂停以便恢复。
+            var wasPlaying = _player?.IsPlaying ?? false;
+            _mainVideoPausedByAlarm = wasPlaying;
+            if (wasPlaying)
+            {
+                AppLogger.Info("检测到主视频正在播放，报警开始时主动暂停主视频。");
+                _player?.SetPause(true);
+            }
+            else
+            {
+                AppLogger.Info("主视频当前未播放，报警无需额外暂停。");
+            }
+
 
             // 使用独立的播放器播放报警音频，循环由 input-repeat 选项驱动，避免影响主播放器状态。
-            PlayAlarmMedia(alarmPath);
+            PlayAlarmMedia(alarmPath, preferredAlarmVolume);
 
             var currentCts = _alarmPlaybackCts;
             _ = Task.Run(async () =>
@@ -538,29 +554,62 @@ namespace WpfVideoPet
                 await Dispatcher.InvokeAsync(() => StopAlarmLoop("播放时长到期"));
             });
         }
-
         /// <summary>
         /// 使用独立播放器播放报警音频，避免打断主视频的播放状态。
         /// </summary>
         /// <param name="alarmPath">报警音频的本地绝对路径。</param>
-        private void PlayAlarmMedia(string alarmPath)
+        /// <param name="preferredVolume">报警播放时希望使用的音量（用户设置的原始值）。</param>
+        private void PlayAlarmMedia(string alarmPath, int preferredVolume)
         {
             try
             {
-                if (_alarmPlayer == null)
+                if (_alarmLibVlc == null)
                 {
-                    _alarmPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVlc);
-                    AppLogger.Info("报警播放器初始化完成，复用主 LibVLC 实例但独立于主视频播放器。");
+                    _alarmLibVlc = new LibVLC();
+                    AppLogger.Info("报警播放器专用 LibVLC 已创建，音频状态与主播放器隔离。");
                 }
 
-                using var media = new Media(_libVlc, new Uri(alarmPath));
+                if (_alarmPlayer == null)
+                {
+                    _alarmPlayer = new LibVLCSharp.Shared.MediaPlayer(_alarmLibVlc);
+                    _alarmPlayer.EncounteredError += (_, args) =>
+                    {
+                        AppLogger.Error($"报警播放器遇到错误，媒体: {alarmPath}, 错误信息: {args}");
+                    };
+
+                    _alarmPlayer.Playing += (_, _) =>
+                    {
+                        // 播放回调中再次同步目标音量，确保底层未被外部状态覆盖。
+                        if (_alarmPlayer != null && _alarmPlayer.Volume != _alarmTargetVolume)
+                        {
+                            _alarmPlayer.Volume = _alarmTargetVolume;
+                            AppLogger.Info($"报警播放器回调同步音量，期望值: {_alarmTargetVolume}，实际值: {_alarmPlayer.Volume}。");
+                        }
+
+                        AppLogger.Info($"报警播放器进入播放状态，媒体: {alarmPath}，当前音量: {_alarmPlayer?.Volume}。");
+                    };
+
+                    AppLogger.Info("报警播放器初始化完成，使用独立的 LibVLC 实例以避免音量共享冲突。");
+                }
+
+                using var media = new Media(_alarmLibVlc, new Uri(alarmPath));
                 media.AddOption(":input-repeat=-1");
 
-                // 报警音量跟随当前播放器音量，保留用户感知一致性。
-                _alarmPlayer.Volume = _player.Volume;
+                // 报警音量跟随用户原始设置，避免受压制后的低音量影响，同时确保在 0-200 范围内。
+                var clampedVolume = Math.Clamp(preferredVolume, 0, 200);
+                if (clampedVolume == 0)
+                {
+                    // 若用户静音，为保证能听到报警，使用安全默认音量。
+                    clampedVolume = 80;
+                    AppLogger.Warn("用户音量为 0，已为报警播放应用默认音量 80 以确保提示可闻。");
+                }
+
+                _alarmTargetVolume = clampedVolume;
+
+                _alarmPlayer.Volume = _alarmTargetVolume;
                 _alarmPlayer.Play(media);
 
-                AppLogger.Info($"报警播放器已启动，当前音量: {_alarmPlayer.Volume}，文件: {alarmPath}。");
+                AppLogger.Info($"报警播放器已启动，设定音量: {clampedVolume}，主播放器当前音量: {_player.Volume}，文件: {alarmPath}。");
             }
             catch (Exception ex)
             {
@@ -590,7 +639,18 @@ namespace WpfVideoPet
                 _alarmPlayer.Stop();
             }
 
-            EndAudioDucking(DuckingReasonAlarm);
+            if (_mainVideoPausedByAlarm && _player != null)
+            {
+                // 仅在报警期间主动暂停过主视频时恢复，避免覆盖用户原本的暂停状态。
+                AppLogger.Info("报警结束，恢复主视频播放。");
+                _player.SetPause(false);
+            }
+            else
+            {
+                AppLogger.Info("报警结束，主视频无需恢复（之前未被报警暂停或已停止）。");
+            }
+
+            _mainVideoPausedByAlarm = false;
 
             AppLogger.Info($"报警播放已停止，原因: {reason}");
         }
@@ -709,6 +769,12 @@ namespace WpfVideoPet
                 _alarmPlayer.Dispose();
                 _alarmPlayer = null;
                 AppLogger.Info("报警播放器已在窗口关闭时释放。");
+            }
+            if (_alarmLibVlc != null)
+            {
+                _alarmLibVlc.Dispose();
+                _alarmLibVlc = null;
+                AppLogger.Info("报警播放器 LibVLC 实例已释放。");
             }
             _libVlc?.Dispose();
 
@@ -921,7 +987,7 @@ namespace WpfVideoPet
         {
             if (_userPreferredVolume <= 0 || targetPercentage <= 0)
             {
-                AppLogger.Info("压制百分比为 0 或用户音量为 0，直接静音处理。");
+                AppLogger.Warn($"压制百分比为 {targetPercentage} 或用户音量为 {_userPreferredVolume}，将主播放器静音以满足压制逻辑。");
                 return 0;
             }
 
