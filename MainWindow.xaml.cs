@@ -528,6 +528,9 @@ namespace WpfVideoPet
             {
                 AppLogger.Info("检测到主视频正在播放，报警开始时主动暂停主视频。");
                 _player?.SetPause(true);
+
+                // 在主视频暂停期间显示居中文案，提醒用户正在播放报警且稍后恢复。
+                ShowAlarmPauseOverlay();
             }
             else
             {
@@ -651,10 +654,37 @@ namespace WpfVideoPet
             }
 
             _mainVideoPausedByAlarm = false;
-
+            // 报警结束后隐藏暂停提示，避免残留遮挡。
+            HideAlarmPauseOverlay();
             AppLogger.Info($"报警播放已停止，原因: {reason}");
         }
+        /// <summary>
+        /// 显示报警暂停提示，提醒用户视频将在报警结束后自动恢复。
+        /// </summary>
+        private void ShowAlarmPauseOverlay()
+        {
+            Dispatcher.Invoke(() =>
+            {
+                AlarmOverlayText.Text = "警报播放中，稍后恢复视频。";
+                AlarmOverlay.Visibility = Visibility.Visible;
+                AppLogger.Info("已显示报警暂停提示覆盖层，提示用户等待主视频恢复。");
+            });
+        }
 
+        /// <summary>
+        /// 隐藏报警暂停提示，恢复正常观看体验。
+        /// </summary>
+        private void HideAlarmPauseOverlay()
+        {
+            Dispatcher.Invoke(() =>
+            {
+                if (AlarmOverlay.Visibility != Visibility.Collapsed)
+                {
+                    AlarmOverlay.Visibility = Visibility.Collapsed;
+                    AppLogger.Info("已隐藏报警暂停提示覆盖层。");
+                }
+            });
+        }
 
         /// <summary>
         /// 解析报警铃声文件路径，默认放在应用目录 videos/jingbao.mp3 下。
