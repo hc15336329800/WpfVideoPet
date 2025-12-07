@@ -80,6 +80,7 @@ namespace WpfVideoPet
         private const string DuckingReasonAiChat = "AI_CHAT_WINDOW"; // AI 弹窗压制标识
         private const string DuckingReasonTts = "AI_CHAT_TTS"; // TTS 播报压制标识
         private const string DuckingReasonVideoCall = "VIDEO_CALL_WINDOW"; // 视频通话压制标识
+        private const string DuckingReasonAlarm = "ALARM_LOOP"; // 报警播放压制标识
         private RemoteMediaService? _remoteMediaService; // PLC 视频服务实例
         private MqttSoundControlService? _mqttSoundControlService; // MQTT 音量控制服务实例
         private MqttAlarmLoopService? _mqttAlarmLoopService; // MQTT 报警播放服务实例
@@ -94,6 +95,8 @@ namespace WpfVideoPet
         private bool _hasScheduledDefaultPlayback; // 是否已安排默认播放
         private readonly object _alarmPlaybackLock = new(); // 报警播放同步锁
         private CancellationTokenSource? _alarmPlaybackCts; // 报警播放取消源
+        private LibVLCSharp.Shared.MediaPlayer? _alarmPlayer; // 独立的报警播放器，避免打断主视频
+
 
 
 
@@ -511,11 +514,13 @@ namespace WpfVideoPet
             ctsToCancel?.Cancel();
             ctsToCancel?.Dispose();
 
-            AppLogger.Info($"开始报警循环播放，文件: {alarmPath}，目标时长: {duration}。");
+            AppLogger.Info($"开始报警循环播放，文件: {alarmPath}，目标时长: {duration}。降低主视频音量但不打断播放。");
 
-            // 使用现有播放管线，保持循环直到主动停止。
-            _player.Repeat = true;
-            PlayFile(alarmPath);
+            // 启动报警前降低主视频音量，确保提示音不被视频淹没且保持连续播放。
+            BeginAudioDucking(DuckingReasonAlarm);
+
+            // 使用独立的播放器播放报警音频，循环由 input-repeat 选项驱动，避免影响主播放器状态。
+            PlayAlarmMedia(alarmPath);
 
             var currentCts = _alarmPlaybackCts;
             _ = Task.Run(async () =>
@@ -535,6 +540,35 @@ namespace WpfVideoPet
         }
 
         /// <summary>
+        /// 使用独立播放器播放报警音频，避免打断主视频的播放状态。
+        /// </summary>
+        /// <param name="alarmPath">报警音频的本地绝对路径。</param>
+        private void PlayAlarmMedia(string alarmPath)
+        {
+            try
+            {
+                if (_alarmPlayer == null)
+                {
+                    _alarmPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVlc);
+                    AppLogger.Info("报警播放器初始化完成，复用主 LibVLC 实例但独立于主视频播放器。");
+                }
+
+                using var media = new Media(_libVlc, new Uri(alarmPath));
+                media.AddOption(":input-repeat=-1");
+
+                // 报警音量跟随当前播放器音量，保留用户感知一致性。
+                _alarmPlayer.Volume = _player.Volume;
+                _alarmPlayer.Play(media);
+
+                AppLogger.Info($"报警播放器已启动，当前音量: {_alarmPlayer.Volume}，文件: {alarmPath}。");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error(ex, $"报警播放器启动失败，文件: {alarmPath}");
+            }
+        }
+
+        /// <summary>
         /// 主动停止报警循环播放，重置循环标记并释放定时任务。
         /// </summary>
         /// <param name="reason">停止原因。</param>
@@ -550,11 +584,17 @@ namespace WpfVideoPet
             currentCts?.Cancel();
             currentCts?.Dispose();
 
-            _player.Repeat = false;
-            _player.Stop();
+            if (_alarmPlayer != null)
+            {
+                // 仅停止报警播放器，确保主视频不中断。
+                _alarmPlayer.Stop();
+            }
+
+            EndAudioDucking(DuckingReasonAlarm);
 
             AppLogger.Info($"报警播放已停止，原因: {reason}");
         }
+
 
         /// <summary>
         /// 解析报警铃声文件路径，默认放在应用目录 videos/jingbao.mp3 下。
@@ -663,15 +703,24 @@ namespace WpfVideoPet
                 _player.EndReached -= OnPlayerEndReached;
             }
             _player?.Dispose();
+            if (_alarmPlayer != null)
+            {
+                _alarmPlayer.Stop();
+                _alarmPlayer.Dispose();
+                _alarmPlayer = null;
+                AppLogger.Info("报警播放器已在窗口关闭时释放。");
+            }
             _libVlc?.Dispose();
 
             EndAudioDucking(DuckingReasonAiChat);
             EndAudioDucking(DuckingReasonTts);
             EndAudioDucking(DuckingReasonVideoCall);
+            EndAudioDucking(DuckingReasonAlarm);
             _volumeRestoreTimer.Stop();
             _transcriptionResetTimer.Stop();
             _aiChatInactivityTimer.Stop();
         }
+
 
         // 说明：此方法在你的构造函数事件绑定中被频繁调用，确保存在
         private void UpdateOverlayBounds()
@@ -1074,6 +1123,7 @@ namespace WpfVideoPet
 
             if (_mqttAlarmLoopService != null)
             {
+                AppLogger.Info($"报警播放服务已存在，沿用配置主题: {configuredTopic}");
                 return configuredTopic;
             }
 

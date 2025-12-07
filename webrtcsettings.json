@@ -59,6 +59,12 @@
     "topic": "LHTDA4B48SY9JA047/sound"
   },
 
+  "mqtt_alarm": {
+    "_comment": "控制报警音频的播放，订阅该主题可下发播放时长等指令。",
+    "topic": "LHTDA4B48SY9JA047/alarm",
+    "defaultDurationSeconds": 60
+  },
+
   "mqtt_plc": {
     "_comment": "西门子 S7 PLC 参数，包含轮询与控制区配置。",
     "enabled": true,
