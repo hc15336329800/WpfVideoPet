@@ -2,14 +2,18 @@
 <!--
   启用每屏 DPI 感知的清单，确保在 Win11 无显示器或延迟接入时仍能得到正确缩放。
   该文件随项目一起提交，避免构建时出现缺少 app.manifest 的错误。
+  应用程序清单
 -->
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1" xmlns:asmv3="urn:schemas-microsoft-com:asm.v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <assemblyIdentity version="1.0.0.0" name="WpfVideoPet.app" />
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-		  <!-- 改为管理员权限运行 -->
-		  <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+		  <!-- 改为管理员权限运行 程序启动时 必定弹出 UAC（需要管理员同意） -->
+		  <!-- <requestedExecutionLevel level="requireAdministrator" uiAccess="false" /> -->
+		  <!-- 改为普通权限运行-->
+		  <requestedExecutionLevel level="asInvoker" uiAccess="false" />  
+
 	  </requestedPrivileges>
     </security>
   </trustInfo>
