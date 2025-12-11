@@ -88,7 +88,7 @@ namespace WpfVideoPet
         private PlcSubTestService? _plcSubTestService; // PLC 测试服务实例
         private readonly WeatherService _weatherService = new(); // 天气服务实例
         private readonly DispatcherTimer _weatherRefreshTimer; // 天气刷新计时器 30分钟
-        private const string FixedWeatherCity = "内蒙准格尔大陆新区"; // 固定展示的城市
+        private const string FixedWeatherCity = "内蒙古自治区准格尔旗大路新区"; // 固定展示的城市
         private readonly DisplayEnvironmentService _displayEnvironmentService; // 显示环境服务
         private DisplaySnapshot _currentDisplaySnapshot; // 当前显示快照
         private readonly string _defaultStartupMediaPath; // 默认启动视频路径

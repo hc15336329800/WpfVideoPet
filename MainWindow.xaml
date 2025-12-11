@@ -10,15 +10,17 @@
     <Grid>
         <!-- 视频区域：默认使用黑色背景，避免加载前出现白屏闪烁 -->
         <vlc:VideoView x:Name="VideoView" Background="Black"/>
-        
-        <!-- 报警暂停提示：在主视频被报警暂停时居中显示提醒文本 -->
+
+        <!-- 报警暂停提示：在主视频被报警暂停时居中显示提醒文本；提高 ZIndex 以确保不被视频遮挡且不拦截点击。 -->
         <Border x:Name="AlarmOverlay"
                 Background="#80000000"
                 Visibility="Collapsed"
                 CornerRadius="8"
                 Padding="12"
                 HorizontalAlignment="Center"
-                VerticalAlignment="Center">
+                VerticalAlignment="Center"
+                Panel.ZIndex="10"
+                IsHitTestVisible="False">
             <TextBlock x:Name="AlarmOverlayText"
                        Text="警报播放中，稍后恢复视频。"
                        Foreground="White"
@@ -27,7 +29,8 @@
                        TextAlignment="Center"/>
         </Border>
 
-        <DockPanel VerticalAlignment="Bottom" Background="#66000000" Height="56">
+        <DockPanel VerticalAlignment="Bottom" Background="#66000000" Height="56" Visibility="Collapsed">
+
             <StackPanel Orientation="Horizontal" Margin="12,0" VerticalAlignment="Center">
                 <Button Content="打开" Click="BtnOpen_Click" Margin="0,0,8,0" Padding="10,4"/>
                 <Button Content="播放" Click="BtnPlay_Click" Margin="0,0,8,0" Padding="10,4"/>
