@@ -99,6 +99,11 @@ namespace WpfVideoPet
         private LibVLC? _alarmLibVlc; // 报警播放器专用 LibVLC 实例，防止音量状态共享   //目前没有成功，改用了暂停视频播放。
         private int _alarmTargetVolume; // 最近一次报警播放期望的音量，便于回调中保持一致
         private bool _mainVideoPausedByAlarm; // 记录报警是否主动暂停过主视频，便于结束后恢复
+        private bool _mainVideoPausedByEmergencyStop; // 记录急停是否暂停过主视频
+        private bool _plcEmergencyStopActive; // 记录当前急停状态
+        private bool _plcEmergencyStopNotified; // 记录急停弹窗是否已提醒
+        private bool _plcStatusHandlerAttached; // 记录 PLC 状态订阅是否已挂载
+        private EventHandler<MqttCoreService.MqttBridgeMessage>? _plcStatusHandler; // PLC 状态消息回调
 
 
 
@@ -645,8 +650,15 @@ namespace WpfVideoPet
             if (_mainVideoPausedByAlarm && _player != null)
             {
                 // 仅在报警期间主动暂停过主视频时恢复，避免覆盖用户原本的暂停状态。
-                AppLogger.Info("报警结束，恢复主视频播放。");
-                _player.SetPause(false);
+                if (_plcEmergencyStopActive)
+                {
+                    AppLogger.Info("报警结束，但急停仍在，保持主视频暂停。");
+                }
+                else
+                {
+                    AppLogger.Info("报警结束，恢复主视频播放。");
+                    _player.SetPause(false);
+                }
             }
             else
             {
@@ -1867,6 +1879,12 @@ namespace WpfVideoPet
             _wakeService.SpeechRecognitionRequested -= OnSpeechRecognitionRequested;
             _wakeService.Dispose();
 
+            if (_mqttBridge != null && _plcStatusHandlerAttached && _plcStatusHandler != null)
+            {
+                _mqttBridge.MessageReceived -= _plcStatusHandler;
+                _plcStatusHandlerAttached = false;
+            }
+
 
             if (_plcService != null)
             {
@@ -2001,6 +2019,8 @@ namespace WpfVideoPet
                 {
                     AppLogger.Info("Siemens S7 服务暂未初始化，仅启动 PLC 订阅测试服务。");
                 }
+
+                await AttachPlcStatusSubscriptionAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -2008,6 +2028,155 @@ namespace WpfVideoPet
             }
         }
 
+        /// <summary>
+        /// 订阅 PLC 状态上报主题并挂载消息回调，
+        /// 用于解析 DB201.DBX0.0 急停位并驱动视频通话与暂停提示。
+        /// </summary>
+        private async Task AttachPlcStatusSubscriptionAsync()
+        {
+            if (_mqttBridge == null)
+            {
+                AppLogger.Warn("MQTT 桥接尚未就绪，跳过 PLC 状态订阅。");
+                return;
+            }
+
+            var statusTopic = _appConfig.MqttPlc.StatusPublishTopic?.Trim(); // PLC 状态主题
+            if (string.IsNullOrWhiteSpace(statusTopic))
+            {
+                AppLogger.Warn("未配置 PLC 状态上报主题，急停控制逻辑未启用。");
+                return;
+            }
+
+            if (_plcStatusHandlerAttached)
+            {
+                return;
+            }
+
+            _plcStatusHandler ??= OnPlcStatusMessageReceived;
+            await _mqttBridge.SubscribeAdditionalTopicAsync(statusTopic).ConfigureAwait(false);
+            _mqttBridge.MessageReceived += _plcStatusHandler;
+            _plcStatusHandlerAttached = true;
+            AppLogger.Info($"已挂载 PLC 状态监听，主题: {statusTopic}");
+        }
+
+        /// <summary>
+        /// 接收 PLC 状态上报消息，解析末尾急停位，
+        /// 并将状态更新派发到 UI 线程执行。
+        /// </summary>
+        /// <param name="sender">消息事件源。</param>
+        /// <param name="message">MQTT 桥接消息。</param>
+        private void OnPlcStatusMessageReceived(object? sender, MqttCoreService.MqttBridgeMessage message)
+        {
+            var statusTopic = _appConfig.MqttPlc.StatusPublishTopic?.Trim(); // PLC 状态主题
+            if (string.IsNullOrWhiteSpace(statusTopic))
+            {
+                return;
+            }
+
+            if (!string.Equals(message.Topic, statusTopic, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var payloadText = Encoding.UTF8.GetString(message.Payload.Span).Trim(); // PLC 状态位字符串
+            if (!TryParseEmergencyStop(payloadText, out var isActive))
+            {
+                AppLogger.Warn($"PLC 状态消息解析失败，内容: {payloadText}");
+                return;
+            }
+
+            Dispatcher.BeginInvoke(new Action(() => ApplyEmergencyStopState(isActive)));
+        }
+
+        /// <summary>
+        /// 尝试从 PLC 状态位字符串中解析急停状态，
+        /// 默认取末尾追加的 DB201.DBX0.0 位。
+        /// </summary>
+        /// <param name="payloadText">PLC 状态位字符串。</param>
+        /// <param name="isActive">解析到的急停状态。</param>
+        /// <returns>解析成功返回 true，否则返回 false。</returns>
+        private static bool TryParseEmergencyStop(string payloadText, out bool isActive)
+        {
+            isActive = false;
+            if (string.IsNullOrWhiteSpace(payloadText))
+            {
+                return false;
+            }
+
+            var lastChar = payloadText[^1];
+            if (lastChar is '0' or '1')
+            {
+                isActive = lastChar == '1';
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 根据急停状态更新视频通话触发、主视频暂停与提示弹窗，
+        /// 仅在状态变化时执行边沿触发与清理逻辑。
+        /// </summary>
+        /// <param name="isActive">当前急停状态。</param>
+        private void ApplyEmergencyStopState(bool isActive)
+        {
+            var wasActive = _plcEmergencyStopActive;
+            _plcEmergencyStopActive = isActive;
+
+            if (isActive)
+            {
+                if (!wasActive)
+                {
+                    ShowVideoCallWindow();
+                }
+
+                PauseMainVideoForEmergencyStop();
+
+                if (!_plcEmergencyStopNotified)
+                {
+                    _plcEmergencyStopNotified = true;
+                    MessageBox.Show("小车急停中，请旋转急停按钮恢复正常，感谢配合~", "急停提醒", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+            else if (wasActive)
+            {
+                _plcEmergencyStopNotified = false;
+                ResumeMainVideoAfterEmergencyStop();
+            }
+        }
+
+        /// <summary>
+        /// 确保急停状态下主视频保持暂停，并记录是否由急停触发。
+        /// </summary>
+        private void PauseMainVideoForEmergencyStop()
+        {
+            if (_player == null)
+            {
+                return;
+            }
+
+            if (_player.IsPlaying)
+            {
+                _player.SetPause(true);
+                _mainVideoPausedByEmergencyStop = true;
+                AppLogger.Info("检测到急停状态，已暂停主视频播放。");
+            }
+        }
+
+        /// <summary>
+        /// 在急停解除后恢复此前被急停暂停的主视频播放状态。
+        /// </summary>
+        private void ResumeMainVideoAfterEmergencyStop()
+        {
+            if (_player == null || !_mainVideoPausedByEmergencyStop)
+            {
+                return;
+            }
+
+            _player.SetPause(false);
+            _mainVideoPausedByEmergencyStop = false;
+            AppLogger.Info("急停解除，已恢复主视频播放。");
+        }
 
         private void InitializeWakeService()
         {
@@ -2554,7 +2723,7 @@ namespace WpfVideoPet
 
         private void OnWakeTriggered(object? sender, EventArgs e)
         {
-            Dispatcher.BeginInvoke(new Action(ShowVideoCallWindow));
+            AppLogger.Info("语音唤醒视频已暂时屏蔽，改由 PLC 急停状态控制。");
         }
         private void ShowVideoCallWindow()
         {
