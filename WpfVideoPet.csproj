@@ -8,6 +8,10 @@
 		<UseWPF>true</UseWPF>
 		<PlatformTarget>x64</PlatformTarget>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
+		
+		 <TargetPlatformVersion>10.0.26100.0</TargetPlatformVersion> 
+		<SupportedOSPlatformVersion>10.0.26100.0</SupportedOSPlatformVersion> 
+  
 	</PropertyGroup>
 
 	<ItemGroup>
