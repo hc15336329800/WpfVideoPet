@@ -107,11 +107,10 @@ namespace WpfVideoPet
         {
             if (!_config.TryValidate(out var validationError))
             {
-                MessageBox.Show(this,
+                AutoCloseMessageBox.Show(
                     validationError ?? "SIGNAL_SERVER 配置无效，请检查后重试。",
                     "配置错误",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
+                    this);
                 Close();
                 return;
             }
@@ -137,11 +136,10 @@ namespace WpfVideoPet
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this,
+                AutoCloseMessageBox.Show(
                     $"WebView2 初始化失败: {ex.Message}",
                     "错误",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
+                    this);
                 Close();
             }
         }
@@ -162,11 +160,10 @@ namespace WpfVideoPet
                     : "未知错误";
                 var message = $"页面加载失败：{errorDetail}";
                 ClientStatusText.Text = message;
-                MessageBox.Show(this,
+                AutoCloseMessageBox.Show(
                     message,
                     "页面加载失败",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
+                    this);
             }
         }
 

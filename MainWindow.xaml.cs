@@ -101,7 +101,7 @@ namespace WpfVideoPet
         private bool _mainVideoPausedByAlarm; // 记录报警是否主动暂停过主视频，便于结束后恢复
         private bool _mainVideoPausedByEmergencyStop; // 记录急停是否暂停过主视频
         private bool _plcEmergencyStopActive; // 记录当前急停状态
-        private bool _plcEmergencyStopNotified; // 记录急停弹窗是否已提醒
+        private EmergencyStopWindow? _emergencyStopWindow; // 急停提醒窗口实例
         private bool _plcStatusHandlerAttached; // 记录 PLC 状态订阅是否已挂载
         private EventHandler<MqttCoreService.MqttBridgeMessage>? _plcStatusHandler; // PLC 状态消息回调
 
@@ -2132,17 +2132,51 @@ namespace WpfVideoPet
 
                 PauseMainVideoForEmergencyStop();
 
-                if (!_plcEmergencyStopNotified)
-                {
-                    _plcEmergencyStopNotified = true;
-                    MessageBox.Show("小车急停中，请旋转急停按钮恢复正常，感谢配合~", "急停提醒", MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
+                ShowEmergencyStopReminder();
             }
             else if (wasActive)
             {
-                _plcEmergencyStopNotified = false;
+                CloseEmergencyStopReminder();
                 ResumeMainVideoAfterEmergencyStop();
             }
+        }
+
+        /// <summary>
+        /// 显示急停提示窗口并保持置顶，避免被视频页面遮挡。
+        /// </summary>
+        private void ShowEmergencyStopReminder()
+        {
+            const string message = "小车急停中，请旋转急停按钮恢复正常，感谢配合~"; // 急停提示文案
+            if (_emergencyStopWindow != null)
+            {
+                if (_emergencyStopWindow.IsVisible)
+                {
+                    _emergencyStopWindow.EnsureOnTop();
+                    return;
+                }
+
+                _emergencyStopWindow.Close();
+                _emergencyStopWindow = null;
+            }
+
+            _emergencyStopWindow = new EmergencyStopWindow(message, this);
+            _emergencyStopWindow.Closed += (_, _) => _emergencyStopWindow = null;
+            _emergencyStopWindow.Show();
+            _emergencyStopWindow.EnsureOnTop();
+        }
+
+        /// <summary>
+        /// 关闭急停提示窗口，确保急停解除后提醒自动消失。
+        /// </summary>
+        private void CloseEmergencyStopReminder()
+        {
+            if (_emergencyStopWindow == null)
+            {
+                return;
+            }
+
+            _emergencyStopWindow.Close();
+            _emergencyStopWindow = null;
         }
 
         /// <summary>
