@@ -2136,6 +2136,7 @@ namespace WpfVideoPet
             }
             else if (wasActive)
             {
+                CloseVideoCallWindow();
                 CloseEmergencyStopReminder();
                 ResumeMainVideoAfterEmergencyStop();
             }
@@ -2790,6 +2791,19 @@ namespace WpfVideoPet
             };
             BeginAudioDucking(DuckingReasonVideoCall);
             _videoCallWindow.Show();
+        }
+
+        /// <summary>
+        /// 急停恢复时关闭视频通话窗口，确保释放资源并不影响下一次打开。
+        /// </summary>
+        private void CloseVideoCallWindow()
+        {
+            if (_videoCallWindow == null)
+            {
+                return;
+            }
+
+            _videoCallWindow.Close();
         }
 
 
