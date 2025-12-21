@@ -9,6 +9,7 @@ namespace WpfVideoPet
     public sealed class VisitorClientLogic
     {
         private readonly AppConfig _config;
+        private bool _hasCloseRequested; // 关闭请求是否已触发
 
         public VisitorClientLogic(AppConfig config)
         {
@@ -253,11 +254,17 @@ namespace WpfVideoPet
         }
 
         /// <summary>
-        /// 记录窗口关闭原因并触发关闭请求，便于排查坐席未上线或信令异常等问题。
+        /// 记录并触发窗口关闭请求，确保仅输出首个真实原因，避免重复日志。
         /// </summary>
-        /// <param name="reason">触发关闭的业务原因。</param>
+        /// <param name="reason">触发关闭的业务原因，将作为首条关闭日志输出。</param>
         private void RequestClose(string reason)
         {
+            if (_hasCloseRequested)
+            {
+                return;
+            }
+
+            _hasCloseRequested = true;
             AppLogger.Info($"访客端触发关闭请求，原因: {reason}");
             CloseRequested?.Invoke(this, EventArgs.Empty);
         }
