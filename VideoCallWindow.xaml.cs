@@ -6,8 +6,6 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
-using Windows.Data.Xml.Dom;
-using Windows.UI.Notifications;
 using WebView2Core = Microsoft.Web.WebView2.Core;
 
 namespace WpfVideoPet
