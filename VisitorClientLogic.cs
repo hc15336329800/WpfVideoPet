@@ -152,7 +152,8 @@ namespace WpfVideoPet
             if (evt is "busy" or "no-operator" or "rejected" || isConnectionIssue)
             {
                 SetActiveCall(false);
-                CloseRequested?.Invoke(this, EventArgs.Empty);
+                var closeReason = !string.IsNullOrWhiteSpace(display) ? display : evt ?? "未知原因"; // 关闭原因
+                RequestClose(closeReason);
             }
             else if (evt is "ended")
             {
@@ -187,9 +188,11 @@ namespace WpfVideoPet
             {
                 AlertRaised?.Invoke(this, trimmed);
                 SetActiveCall(false);
-                CloseRequested?.Invoke(this, EventArgs.Empty);
+                var closeReason = $"连接异常: {trimmed}"; // 关闭原因
+                RequestClose(closeReason);
             }
         }
+
 
         private static bool LooksLikeConnectionIssue(string message)
         {
@@ -244,8 +247,19 @@ namespace WpfVideoPet
 
             if (!isActive && wasActive)
             {
-                CloseRequested?.Invoke(this, EventArgs.Empty);
+                var closeReason = "通话结束"; // 关闭原因
+                RequestClose(closeReason);
             }
+        }
+
+        /// <summary>
+        /// 记录窗口关闭原因并触发关闭请求，便于排查坐席未上线或信令异常等问题。
+        /// </summary>
+        /// <param name="reason">触发关闭的业务原因。</param>
+        private void RequestClose(string reason)
+        {
+            AppLogger.Info($"访客端触发关闭请求，原因: {reason}");
+            CloseRequested?.Invoke(this, EventArgs.Empty);
         }
     }
 }

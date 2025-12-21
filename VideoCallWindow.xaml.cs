@@ -141,6 +141,7 @@ namespace WpfVideoPet
                 Close();
             }
         }
+        
 
         private void Web_NavigationCompleted(object? sender, WebView2Core.CoreWebView2NavigationCompletedEventArgs e)
         {
