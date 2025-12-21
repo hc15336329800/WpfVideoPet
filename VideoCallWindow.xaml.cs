@@ -6,7 +6,13 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
+using Windows.UI.Notifications;
 using WebView2Core = Microsoft.Web.WebView2.Core;
+
+
+//新需求是：
+//call.js 发消息给宿主 → 宿主弹出“非阻碍式、会消失的提醒”。
+//这属于 WPF + WebView2 典型场景，不需要 Uno.UI。
 
 namespace WpfVideoPet
 {
