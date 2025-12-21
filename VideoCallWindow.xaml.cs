@@ -109,8 +109,7 @@ namespace WpfVideoPet
             {
                 AutoCloseMessageBox.Show(
                     validationError ?? "SIGNAL_SERVER 配置无效，请检查后重试。",
-                    "配置错误",
-                    this);
+                    "配置错误");
                 Close();
                 return;
             }
@@ -138,8 +137,7 @@ namespace WpfVideoPet
             {
                 AutoCloseMessageBox.Show(
                     $"WebView2 初始化失败: {ex.Message}",
-                    "错误",
-                    this);
+                    "错误");
                 Close();
             }
         }
