@@ -1,0 +1,13 @@
+﻿序号	点位名称	物理点位	类型	功能	对应DB块
+0	kaigai	Q0.0	数字量输入DQ	开盖	DB200.DBX0.0
+1	guangai	Q0.1	数字量输入DQ	关盖	DB200.DBX0.1
+2	shangsheng	Q0.2	数字量输入DQ	上升	DB200.DBX0.2
+3	xiajiang	Q0.3	数字量输入DQ	下降	DB200.DBX0.3
+4	dianshi	Q0.4	数字量输入DQ	电视	DB200.DBX0.4
+5	zhaoming	Q0.5	数字量输入DQ	照明	DB200.DBX0.5
+6	zhongxiajingdeng	Q0.6	数字量输入DQ	中下警灯	DB200.DBX0.6
+7	yinxiang	Q0.7	数字量输入DQ	音响	DB200.DBX0.7
+8	jingdeng	Q1.0	数字量输入DQ	警灯	DB200.DBX1.0
+9	haikang	Q1.1	数字量输入DQ	海康	DB200.DBX1.1
+10	AirplaneOpen	Q1.2	数字量输入DQ	上升指令（直接走他们的箱子）	DB200.DBX1.2
+11	AirplaneClose	Q1.3	数字量输入DQ	下降指令（直接走他们的箱子）	DB200.DBX1.3
