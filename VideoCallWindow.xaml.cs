@@ -16,6 +16,7 @@ namespace WpfVideoPet
 {
     public partial class VideoCallWindow : Window
     {
+        private static readonly TimeSpan DefaultRingTimeoutInterval = TimeSpan.FromMinutes(1); // 默认呼叫超时时间
         private readonly AppConfig _config;
         private bool _pageReady;
         private bool _hasActiveCall;
@@ -23,27 +24,53 @@ namespace WpfVideoPet
         private bool _isPaused;
         private readonly DispatcherTimer? _ringTimeoutTimer;
         private bool _ringTimeoutStarted;
+        private readonly TimeSpan _ringTimeoutInterval; // 当前呼叫超时时间
         private string? _lastNotificationSignature;
- 
 
-        public VideoCallWindow() : this(AppConfig.Load(null))
+
+        /// <summary>
+        /// 初始化视频通话窗口，使用默认配置与默认呼叫超时策略。
+        /// </summary>
+        public VideoCallWindow() : this(AppConfig.Load(null), null)
         {
         }
 
-        public VideoCallWindow(string? roleOverride) : this(AppConfig.Load(roleOverride))
+        /// <summary>
+        /// 初始化视频通话窗口，支持覆盖角色配置并使用默认呼叫超时策略。
+        /// </summary>
+        /// <param name="roleOverride">可选的角色覆盖值。</param>
+        public VideoCallWindow(string? roleOverride) : this(AppConfig.Load(roleOverride), null)
         {
         }
 
-        private VideoCallWindow(AppConfig config)
+        /// <summary>
+        /// 初始化视频通话窗口，并允许指定呼叫未接通的自动挂断时间。
+        /// </summary>
+        /// <param name="ringTimeoutInterval">呼叫未接通的超时时间，未设置则使用默认值。</param>
+        public VideoCallWindow(TimeSpan? ringTimeoutInterval) : this(AppConfig.Load(null), ringTimeoutInterval)
+        {
+        }
+
+        /// <summary>
+        /// 初始化视频通话窗口，允许覆盖角色配置并指定呼叫超时规则。
+        /// </summary>
+        /// <param name="roleOverride">可选的角色覆盖值。</param>
+        /// <param name="ringTimeoutInterval">呼叫未接通的超时时间，未设置则使用默认值。</param>
+        public VideoCallWindow(string? roleOverride, TimeSpan? ringTimeoutInterval) : this(AppConfig.Load(roleOverride), ringTimeoutInterval)
+        {
+        }
+
+        private VideoCallWindow(AppConfig config, TimeSpan? ringTimeoutInterval)
         {
             _config = config;
+            _ringTimeoutInterval = ringTimeoutInterval ?? DefaultRingTimeoutInterval;
 
             if (!_config.IsOperator)
             {
                 _clientLogic = new VisitorClientLogic(_config);
                 _ringTimeoutTimer = new DispatcherTimer
                 {
-                    Interval = TimeSpan.FromMinutes(1)
+                    Interval = _ringTimeoutInterval
                 };
                 _ringTimeoutTimer.Tick += RingTimeoutTimer_Tick;
                 _clientLogic.StatusTextChanged += (_, message) =>

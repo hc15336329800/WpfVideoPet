@@ -2127,7 +2127,7 @@ namespace WpfVideoPet
             {
                 if (!wasActive)
                 {
-                    ShowVideoCallWindow();
+                    ShowVideoCallWindow(true);
                 }
 
                 PauseMainVideoForEmergencyStop();
@@ -2760,7 +2760,11 @@ namespace WpfVideoPet
         {
             AppLogger.Info("语音唤醒视频已暂时屏蔽，改由 PLC 急停状态控制。");
         }
-        private void ShowVideoCallWindow()
+        /// <summary>
+        /// 打开视频通话窗口，并根据触发来源设置未接通时自动挂断的超时策略。
+        /// </summary>
+        /// <param name="fromEmergencyStop">是否由急停触发，用于应用更短的自动挂断时间。</param>
+        private void ShowVideoCallWindow(bool fromEmergencyStop = false)
         {
             if (_videoCallWindow != null)
             {
@@ -2779,10 +2783,12 @@ namespace WpfVideoPet
                 _videoCallWindow = null;
             }
 
-            _videoCallWindow = new VideoCallWindow
-            {
-                Owner = this
-            };
+            var videoCallWindow = fromEmergencyStop
+                ? new VideoCallWindow(TimeSpan.FromSeconds(30)) //30s未接通则关闭窗口
+                : new VideoCallWindow(); // 需要显示的视频通话窗口
+            videoCallWindow.Owner = this;
+            _videoCallWindow = videoCallWindow;
+
             _videoCallWindow.Closed += (_, _) =>
             {
                 AppLogger.Info("视频通话窗口已关闭，准备恢复背景音乐音量。");
