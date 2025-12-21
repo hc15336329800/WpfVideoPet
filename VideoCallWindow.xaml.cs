@@ -7,7 +7,9 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
 using Windows.Data.Xml.Dom;
- 
+using Windows.UI.Notifications;
+using WebView2Core = Microsoft.Web.WebView2.Core;
+
 namespace WpfVideoPet
 {
     public partial class VideoCallWindow : Window
@@ -143,7 +145,7 @@ namespace WpfVideoPet
             }
         }
 
-        private void Web_NavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+        private void Web_NavigationCompleted(object? sender, WebView2Core.CoreWebView2NavigationCompletedEventArgs e)
         {
             _pageReady = e.IsSuccess;
             if (e.IsSuccess)
@@ -154,7 +156,7 @@ namespace WpfVideoPet
             else
             {
                 var errorStatus = e.WebErrorStatus;
-                var errorDetail = errorStatus != CoreWebView2WebErrorStatus.Unknown
+                var errorDetail = errorStatus != WebView2Core.CoreWebView2WebErrorStatus.Unknown
                     ? errorStatus.ToString()
                     : "未知错误";
                 var message = $"页面加载失败：{errorDetail}";
@@ -167,7 +169,7 @@ namespace WpfVideoPet
             }
         }
 
-        private void CoreWebView2_WebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+        private void CoreWebView2_WebMessageReceived(object? sender, WebView2Core.CoreWebView2WebMessageReceivedEventArgs e)
         {
             try
             {
@@ -505,18 +507,18 @@ namespace WpfVideoPet
             base.OnClosing(e);
         }
 
-        private void CoreWebView2_PermissionRequested(object? sender, CoreWebView2PermissionRequestedEventArgs args)
+        private void CoreWebView2_PermissionRequested(object? sender, WebView2Core.CoreWebView2PermissionRequestedEventArgs args)
         {
             if (args == null)
             {
                 return;
             }
 
-            if (args.PermissionKind == CoreWebView2PermissionKind.Microphone ||
-      args.PermissionKind == CoreWebView2PermissionKind.Camera ||
-      IsScreenCapturePermission(args.PermissionKind))
+            if (args.PermissionKind == WebView2Core.CoreWebView2PermissionKind.Microphone ||
+       args.PermissionKind == WebView2Core.CoreWebView2PermissionKind.Camera ||
+       IsScreenCapturePermission(args.PermissionKind))
             {
-                args.State = CoreWebView2PermissionState.Allow;
+                args.State = WebView2Core.CoreWebView2PermissionState.Allow;
             }
         }
 
@@ -538,7 +540,7 @@ namespace WpfVideoPet
             return null;
         }
 
-        private static bool IsScreenCapturePermission(CoreWebView2PermissionKind permissionKind)
+        private static bool IsScreenCapturePermission(WebView2Core.CoreWebView2PermissionKind permissionKind)
         {
             // Screen capture permission was introduced after some WebView2 releases.
             // Compare using the enum name so the code continues to compile with older versions.
