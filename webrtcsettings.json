@@ -39,8 +39,8 @@
     "_comment": "MQTT 对接配置，可根据后端平台的实际分配进行调整。",
     "enabled": true,
     "serverUri": "tcp://60.208.82.254:1883",
-    "clientId": "LHTDA4B48SY9JA047", // 上位机唯一标识␊
-    "topic": "LHTDA4B48SY9JA047", //默认主题␊
+    "clientId": "LHTDA4B48SY9JA047-1", // 上位机唯一标识␊
+    "topic": "LHTDA4B48SY9JA047-1", //默认主题␊
     "username": "admin",
     "password": "admin",
     "qos": 1,
@@ -51,17 +51,17 @@
 
   "mqtt_video": {
     "_comment": "订阅的视频主题",
-    "topic": "LHTDA4B48SY9JA047" //视频订阅的默认主题␊
+    "topic": "LHTDA4B48SY9JA047-1" //视频订阅的默认主题␊
   },
 
   "mqtt_sound": {
     "_comment": "控制声音大小",
-    "topic": "LHTDA4B48SY9JA047/sound"
+    "topic": "LHTDA4B48SY9JA047-1/sound"
   },
 
   "mqtt_alarm": {
     "_comment": "控制报警音频的播放，订阅该主题可下发播放时长等指令。",
-    "topic": "LHTDA4B48SY9JA047/alarm",
+    "topic": "LHTDA4B48SY9JA047-1/alarm",
     "defaultDurationSeconds": 60
   },
 
@@ -73,19 +73,19 @@
     "rack": 0,
     "slot": 1,
     "pollingIntervalMilliseconds": 1500,
-    "statusPublishTopic": "LHTDA4B48SY9JA047/plc/pub", //向指定的主题（Topic）推送一条消息。
-    "controlSubscribeTopic": "LHTDA4B48SY9JA047/plc/sub", //订阅题（Topic）读取一条消息。
+    "statusPublishTopic": "LHTDA4B48SY9JA047-1/plc/pub", //向指定的主题（Topic）推送一条消息。
+    "controlSubscribeTopic": "LHTDA4B48SY9JA047-1/plc/sub", //订阅题（Topic）读取一条消息。
     "statusArea": {
       "_comment": "轮询读取的 DB 区域。",
       "dbNumber": 200,
       "startByte": 0,
-      "byteLength": 3
+      "byteLength": 2
     },
     "controlArea": {
       "_comment": "允许写入的 DB 区域。",
       "dbNumber": 200,
       "startByte": 0,
-      "byteLength": 3
+      "byteLength": 1
     }
   },
 

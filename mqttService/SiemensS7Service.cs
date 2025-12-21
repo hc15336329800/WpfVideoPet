@@ -28,6 +28,7 @@ namespace WpfVideoPet.service
         private readonly EventHandler<MqttBridgeMessage> _controlHandler; // 控制消息处理器
             
         private const int StatusDataBitLength = 16; // PLC 状态上报固定输出16 位  
+        private static readonly PlcAreaConfig ExtraStatusBitArea = new() { DbNumber = 201, StartByte = 0, ByteLength = 1 }; // 额外状态位 DB201.DBX0.0
 
         private Plc? _plc; // PLC 客户端实例
         private bool _disposed; // 释放标记
@@ -747,7 +748,12 @@ namespace WpfVideoPet.service
                 {
                     var statusBytes = await ReadStatusAreaAsync(cancellationToken).ConfigureAwait(false);
                     var payload = BuildStatusPayload(statusBytes); // 状态位字符串
+                    var extraBit = await ReadExtraStatusBitAsync(cancellationToken).ConfigureAwait(false); // DB201 额外状态位
 
+                    if (extraBit.HasValue && !string.IsNullOrEmpty(payload))
+                    {
+                        payload = string.Concat(payload, extraBit.Value ? "1" : "0"); // 拼接额外状态位
+                    }
                     if (!string.IsNullOrEmpty(payload))
                     {
                         var topic = _config.StatusPublishTopic; // 发布主题
@@ -815,7 +821,23 @@ namespace WpfVideoPet.service
             return NormalizeBitString(bitString, StatusDataBitLength); // 固定长度补齐/裁剪
         }
 
+        /// <summary>
+        /// 读取 DB201.DBX0.0 的额外状态位，补充到常规状态位输出中。
+        /// 该位用于扩展 PLC 状态上报，读取失败时返回 null 并保持原有输出。
+        /// </summary>
+        /// <param name="cancellationToken">用于终止任务的取消标记。</param>
+        /// <returns>读取到的额外状态位，失败时返回 null。</returns>
+        private async Task<bool?> ReadExtraStatusBitAsync(CancellationToken cancellationToken)
+        {
+            var extraBytes = await ReadAreaAsync(ExtraStatusBitArea, cancellationToken).ConfigureAwait(false); // 额外状态区字节
 
+            if (extraBytes.Length == 0)
+            {
+                return null;
+            }
+
+            return (extraBytes[0] & 0x01) == 0x01;
+        }
 
         /// <summary>
         /// 将字节数组转换为 01 字符串，便于前后端传输与解析。
