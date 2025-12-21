@@ -478,6 +478,7 @@
             destroyPeerConnection(true);
             return;
         }
+        //注意：此逻辑为消息发给宿主，宿主弹出提醒。
         state.expectingCloseSocket = null;
         if (state.role === 'operator') {
             setOperatorState('offline', '信令连接已断开');
@@ -489,6 +490,7 @@
         destroyPeerConnection(true);
     }
 
+    //注意：此逻辑为消息发给宿主，宿主弹出提醒。
     function handleWsError(evt) {
         log('signal error', evt);
         if (state.role === 'operator') {

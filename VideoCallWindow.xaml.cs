@@ -2,10 +2,12 @@
 using System;
 using System.ComponentModel;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
-
+using Windows.Data.Xml.Dom;
+ 
 namespace WpfVideoPet
 {
     public partial class VideoCallWindow : Window
@@ -18,6 +20,8 @@ namespace WpfVideoPet
         private readonly DispatcherTimer? _ringTimeoutTimer;
         private bool _ringTimeoutStarted;
         private string? _lastNotificationSignature;
+        private static bool _toastAppIdReady; // 标记是否已设置过 Toast AppId
+        private static readonly string ToastAppId = "WpfVideoPet.VideoCall"; // Toast 通知 AppId
 
         public VideoCallWindow() : this(AppConfig.Load(null))
         {
@@ -249,14 +253,7 @@ namespace WpfVideoPet
                                 : null;
                             if (!string.IsNullOrWhiteSpace(alertMessage))
                             {
-                                Dispatcher.Invoke(() =>
-                                {
-                                    MessageBox.Show(this,
-                                        alertMessage,
-                                        "提示",
-                                        MessageBoxButton.OK,
-                                        MessageBoxImage.Information);
-                                });
+                                Dispatcher.Invoke(() => ShowClientNotification(alertMessage, MessageBoxImage.Information));
                             }
                         }
                         else
@@ -348,11 +345,7 @@ namespace WpfVideoPet
                 }
 
                 var caption = image == MessageBoxImage.Error ? "错误" : "提示";
-                MessageBox.Show(this,
-                    message,
-                    caption,
-                    MessageBoxButton.OK,
-                    image);
+                ShowToastNotification(message, caption, image == MessageBoxImage.Error);
             }
             if (Dispatcher.CheckAccess())
             {
@@ -363,6 +356,55 @@ namespace WpfVideoPet
                 Dispatcher.Invoke(Show);
             }
         }
+
+        /// <summary>
+        /// 显示系统 Toast 通知，避免阻塞主界面交互，必要时会补齐 Toast AppId 配置。
+        /// </summary>
+        /// <param name="message">通知正文内容。</param>
+        /// <param name="title">通知标题内容。</param>
+        /// <param name="isError">是否为错误级别提示。</param>
+        private void ShowToastNotification(string message, string title, bool isError)
+        {
+            try
+            {
+                EnsureToastAppId();
+
+                var toastXml = ToastNotificationManager.GetTemplateContent(ToastTemplateType.ToastText02);
+                var textNodes = toastXml.GetElementsByTagName("text");
+                if (textNodes.Length > 0)
+                {
+                    textNodes[0].AppendChild(toastXml.CreateTextNode(title));
+                }
+                if (textNodes.Length > 1)
+                {
+                    textNodes[1].AppendChild(toastXml.CreateTextNode(message));
+                }
+
+                var toast = new ToastNotification(toastXml);
+                ToastNotificationManager.CreateToastNotifier(ToastAppId).Show(toast);
+            }
+            catch
+            {
+                // 忽略 Toast 失败，避免影响主流程。
+            }
+        }
+
+        /// <summary>
+        /// 设置当前进程的 AppUserModelID，用于启用 Win10+ Toast 通知显示。
+        /// </summary>
+        private static void EnsureToastAppId()
+        {
+            if (_toastAppIdReady)
+            {
+                return;
+            }
+
+            SetCurrentProcessExplicitAppUserModelID(ToastAppId);
+            _toastAppIdReady = true;
+        }
+
+        [DllImport("shell32.dll", SetLastError = true)]
+        private static extern int SetCurrentProcessExplicitAppUserModelID(string appID);
 
         private void SendJoinCommand()
         {
